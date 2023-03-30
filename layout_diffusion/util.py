@@ -31,7 +31,14 @@ def fix_seed():
     os.environ['PYTHONHASHSEED'] = str(seed)
 
 
-def loopy(dl):
+def loopy(data_loader):
+    is_distributed=False
+    if dist.is_initialized() and dist.get_world_size() > 1:
+        is_distributed=True
+    epoch = 0
     while True:
-        for x in iter(dl):
+        if is_distributed:
+            epoch += 1
+            data_loader.sampler.set_epoch(epoch)
+        for x in iter(data_loader):
             yield x

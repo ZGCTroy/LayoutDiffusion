@@ -17,17 +17,15 @@
 import json
 import os
 from collections import defaultdict
-
+import random
 import PIL
 import numpy as np
-import pycocotools.mask as mask_utils
 import torch
-import torch.distributed as dist
 import torchvision.transforms as T
-from skimage.transform import resize as imresize
 from torch.utils.data import Dataset
 
-from layout_diffusion.dataset.util import Resize
+from layout_diffusion.dataset.util import image_normalize, get_contrastive_layout_and_image_labels
+from layout_diffusion.dataset.augmentations import RandomSampleCrop, RandomMirror
 
 
 class CocoSceneGraphDataset(Dataset):
@@ -37,7 +35,11 @@ class CocoSceneGraphDataset(Dataset):
                  include_relationships=True, min_object_size=0.02,
                  min_objects_per_image=3, max_objects_per_image=8, left_right_flip=False,
                  include_other=False, instance_whitelist=None, stuff_whitelist=None, mode='train',
-                 use_deprecated_stuff2017=False, deprecated_coco_stuff_ids_txt='', filter_mode='LostGAN'):
+                 use_deprecated_stuff2017=False, deprecated_coco_stuff_ids_txt='', filter_mode='LostGAN',
+                 use_MinIoURandomCrop=False,
+                 return_obj_region=False, resolutions_to_return_obj_region=[],
+                 return_origin_image=False, specific_image_ids=None
+                 ):
         """
         A PyTorch Dataset for loading Coco and Coco-Stuff annotations and converting
         them to scene graphs on the fly.
@@ -71,6 +73,15 @@ class CocoSceneGraphDataset(Dataset):
         """
         super(Dataset, self).__init__()
 
+        self.return_origin_image = return_origin_image
+        if self.return_origin_image:
+            self.origin_transform = T.Compose([
+                T.ToTensor(),
+                image_normalize()
+            ])
+        self.return_obj_region = return_obj_region
+        self.resolutions_to_return_obj_region = resolutions_to_return_obj_region
+
         if stuff_only and stuff_json is None:
             print('WARNING: Got stuff_only=True but stuff_json=None.')
             print('Falling back to stuff_only=False.')
@@ -83,9 +94,25 @@ class CocoSceneGraphDataset(Dataset):
         self.mask_size = mask_size
         self.max_num_samples = max_num_samples
         self.include_relationships = include_relationships
-        self.left_right_flip = left_right_flip
         self.filter_mode = filter_mode
-        self.set_image_size(image_size)
+        self.image_size = image_size
+        self.min_object_size = min_object_size
+        self.left_right_flip = left_right_flip
+        if left_right_flip:
+            self.random_flip = RandomMirror()
+
+        self.use_MinIoURandomCrop = use_MinIoURandomCrop
+        if use_MinIoURandomCrop:
+            self.MinIoURandomCrop = RandomSampleCrop()
+
+        self.transform = T.Compose([
+            T.ToTensor(),
+            T.Resize(size=image_size, antialias=True),
+            image_normalize()
+        ])
+
+        self.total_num_bbox = 0
+        self.total_num_invalid_bbox = 0
 
         with open(instances_json, 'r') as f:
             instances_data = json.load(f)
@@ -231,10 +258,22 @@ class CocoSceneGraphDataset(Dataset):
             if self.mode == 'val':
                 self.image_ids = self.image_ids[:1024]
             elif self.mode == 'test':
-                self.image_ids = self.image_ids[1024:]
+                self.image_ids = self.image_ids[-2048:]
 
-        if self.max_num_samples:
+        # get specific image ids or get specific number of images
+        self.specific_image_ids = specific_image_ids
+        if self.specific_image_ids:
+            new_image_ids = []
+            for image_id in self.specific_image_ids:
+                if int(image_id) in self.image_ids:
+                    new_image_ids.append(image_id)
+                else:
+                    print('image id: {} is not found in all image id list')
+            self.image_ids = new_image_ids
+
+        elif self.max_num_samples:
             self.image_ids = self.image_ids[:self.max_num_samples]
+
 
         self.vocab['pred_idx_to_name'] = [
             '__in_image__',
@@ -249,13 +288,43 @@ class CocoSceneGraphDataset(Dataset):
         for idx, name in enumerate(self.vocab['pred_idx_to_name']):
             self.vocab['pred_name_to_idx'][name] = idx
 
-    def set_image_size(self, image_size):
-        print('called set_image_size', image_size)
-        transform = [Resize(image_size), T.ToTensor()]
-        origin_image_transform = [T.ToTensor()]
-        self.transform = T.Compose(transform)
-        self.image_size = image_size
-        self.origin_image_transform = T.Compose(origin_image_transform)
+    def filter_invalid_bbox(self, H, W, bbox, is_valid_bbox, verbose=False):
+
+        for idx, obj_bbox in enumerate(bbox):
+            if not is_valid_bbox[idx]:
+                continue
+            self.total_num_bbox += 1
+
+            x, y, w, h = obj_bbox
+
+            if (x >= W) or (y >= H):
+                is_valid_bbox[idx] = False
+                self.total_num_invalid_bbox += 1
+                if verbose:
+                    print(
+                        'total_num = {}, invalid_num = {}, x = {}, y={}, w={}, h={}, W={}, H={}'.format(
+                            self.total_num_bbox, self.total_num_invalid_bbox, x, y, w, h, W, H,
+                        )
+                    )
+                continue
+
+            x0, y0, x1, y1 = x, y, x + w, y + h
+            x1 = np.clip(x + w, 1, W)
+            y1 = np.clip(y + h, 1, H)
+
+            if (y1 - y0 < self.min_object_size) or (x1 - x0 < self.min_object_size):
+                is_valid_bbox[idx] = False
+                self.total_num_invalid_bbox += 1
+                if verbose:
+                    print(
+                        'total_num = {}, invalid_num = {}, x = {}, y={}, w={}, h={}, W={}, H={}'.format(
+                            self.total_num_bbox, self.total_num_invalid_bbox, x, y, w, h, W, H,
+                        )
+                    )
+                continue
+            bbox[idx][0], bbox[idx][1], bbox[idx][2], bbox[idx][3] = x0, y0, x1, y1
+
+        return bbox, is_valid_bbox
 
     def total_objects(self):
         total_objs = 0
@@ -263,6 +332,28 @@ class CocoSceneGraphDataset(Dataset):
             num_objs = len(self.image_id_to_objects[image_id])
             total_objs += num_objs
         return total_objs
+
+    def get_init_meta_data(self, image_id):
+        layout_length = self.max_objects_per_image + 2
+        meta_data = {
+            'obj_bbox': torch.zeros([layout_length, 4]),
+            'obj_class': torch.LongTensor(layout_length).fill_(self.vocab['object_name_to_idx']['__null__']),
+            'is_valid_obj': torch.zeros([layout_length]),
+            'filename': self.image_id_to_filename[image_id].replace('/', '_').split('.')[0]
+        }
+
+        # The first object will be the special __image__ object
+        meta_data['obj_bbox'][0] = torch.FloatTensor([0, 0, 1, 1])
+        meta_data['obj_class'][0] = self.vocab['object_name_to_idx']['__image__']
+        meta_data['is_valid_obj'][0] = 1.0
+
+        return meta_data
+
+    def load_image(self, image_id):
+        with open(os.path.join(self.image_dir, self.image_id_to_filename[image_id]), 'rb') as f:
+            with PIL.Image.open(f) as image:
+                image = image.convert('RGB')
+        return image
 
     def __len__(self):
         return len(self.image_ids)
@@ -286,135 +377,74 @@ class CocoSceneGraphDataset(Dataset):
 
         """
         image_id = self.image_ids[index]
-        flip = False
-        if self.left_right_flip and np.random.rand() < 0.5:
-            flip = True
+        image = self.load_image(image_id)
+        if self.return_origin_image:
+            origin_image = np.array(image, dtype=np.float32) / 255.0
+        image = np.array(image, dtype=np.float32) / 255.0
 
-        filename = self.image_id_to_filename[image_id]
-        image_path = os.path.join(self.image_dir, filename)
-        with open(image_path, 'rb') as f:
-            with PIL.Image.open(f) as origin_image:
-                if flip:
-                    origin_image = PIL.ImageOps.mirror(origin_image)
-                WW, HH = origin_image.size
-                origin_image = origin_image.convert('RGB')
-                image = self.transform(origin_image)
-                origin_image = self.origin_image_transform(origin_image)
+        H, W, _ = image.shape
+        num_obj = len(self.image_id_to_objects[image_id])
+        obj_bbox = np.array([obj['bbox'] for obj in self.image_id_to_objects[image_id]])
+        obj_class = np.array([obj['category_id'] for obj in self.image_id_to_objects[image_id]])
+        is_valid_obj = [True for _ in range(num_obj)]
 
-        H, W = self.image_size
-        objs, boxes, masks, origin_masks, cropped_obj_images = [], [], [], [], []
+        # get meta data
+        meta_data = self.get_init_meta_data(image_id=image_id)
+        meta_data['width'], meta_data['height'] = W, H
+        meta_data['num_obj'] = num_obj
 
-        # Add dummy __image__ object
-        objs.append(self.vocab['object_name_to_idx']['__image__'])
-        boxes.append(torch.FloatTensor([0, 0, 1, 1]))
-        masks.append(torch.ones(self.mask_size, self.mask_size).long())
-        origin_masks.append(torch.zeros(H, W).long())
-        cropped_obj_image = imresize(origin_image, (3, self.mask_size, self.mask_size), mode='constant')
-        cropped_obj_images.append(torch.FloatTensor(cropped_obj_image))
+        # filter invalid bbox
+        obj_bbox, is_valid_obj = self.filter_invalid_bbox(H=H, W=W, bbox=obj_bbox, is_valid_bbox=is_valid_obj)
 
-        # Add valid obj
-        for object_data in self.image_id_to_objects[image_id]:
-            objs.append(object_data['category_id'])
-            x, y, w, h = object_data['bbox']
-            if flip:
-                x = WW - (x+w)
-            x0 = x / WW
-            y0 = y / HH
-            x1 = w / WW
-            y1 = h / HH
+        # flip
+        if self.left_right_flip:
+            image, obj_bbox, obj_class = self.random_flip(image, obj_bbox, obj_class)
 
-            boxes.append(torch.FloatTensor([x0, y0, x1, y1]))
+        # random crop image and its bbox
+        if self.use_MinIoURandomCrop:
+            image, updated_obj_bbox, updated_obj_class, tmp_is_valid_obj = self.MinIoURandomCrop(image, obj_bbox[is_valid_obj], obj_class[is_valid_obj])
 
-            # This will give a numpy array of shape (HH, WW)
-            origin_mask = seg_to_mask(object_data['segmentation'], width=WW, height=HH)
-            if flip:
-                origin_mask = np.fliplr(origin_mask)
+            tmp_idx = 0
+            tmp_tmp_idx = 0
+            for idx, is_valid in enumerate(is_valid_obj):
+                if is_valid:
+                    if tmp_is_valid_obj[tmp_idx]:
+                        obj_bbox[idx] = updated_obj_bbox[tmp_tmp_idx]
+                        tmp_tmp_idx += 1
+                    else:
+                        is_valid_obj[idx] = False
+                    tmp_idx += 1
 
-            # Crop the mask according to the bounding box, being careful to
-            # ensure that we don't crop a zero-area region
+            meta_data['new_height'] = image.shape[0]
+            meta_data['new_width'] = image.shape[1]
+            H, W, _ = image.shape
 
+        obj_bbox = torch.FloatTensor(obj_bbox[is_valid_obj])
+        obj_class = torch.LongTensor(obj_class[is_valid_obj])
+        obj_bbox[:, 0::2] = obj_bbox[:, 0::2] / W
+        obj_bbox[:, 1::2] = obj_bbox[:, 1::2] / H
 
-            mx0, mx1 = int(round(x)), int(round(x + w))
-            my0, my1 = int(round(y)), int(round(y + h))
+        num_selected = min(obj_bbox.shape[0], self.max_objects_per_image)
+        selected_obj_idxs = random.sample(range(obj_bbox.shape[0]), num_selected)
+        meta_data['obj_bbox'][1:1 + num_selected] = obj_bbox[selected_obj_idxs]
+        meta_data['obj_class'][1:1 + num_selected] = obj_class[selected_obj_idxs]
+        meta_data['is_valid_obj'][1:1 + num_selected] = 1.0
+        meta_data['num_selected'] = num_selected
+        meta_data['obj_class_name'] = [self.vocab['object_idx_to_name'][int(class_id)] for class_id in meta_data['obj_class']]
 
-            mx1 = max(mx0 + 1, mx1)
-            my1 = max(my0 + 1, my1)
+        if self.return_obj_region:
+            assert self.resolutions_to_return_obj_region
+            for resolution in self.resolutions_to_return_obj_region:
+                meta_data['labels_from_layout_to_image_at_resolution{}'.format(resolution)] = get_contrastive_layout_and_image_labels(
+                    obj_bbox=meta_data['obj_bbox'],
+                    width=self.image_size[1], height=self.image_size[0],
+                    resolution=resolution
+                )  # L2 x L1
 
-            cropped_obj_image = origin_image[:, my0:my1, mx0:mx1]
-            cropped_obj_image = imresize(cropped_obj_image, (3, self.mask_size, self.mask_size), mode='constant')
-            cropped_obj_image = torch.FloatTensor(cropped_obj_image)
-            cropped_obj_images.append(cropped_obj_image)
+        if self.return_origin_image:
+            meta_data['origin_image'] = self.origin_transform(origin_image)
 
-            mask = origin_mask[my0:my1, mx0:mx1]
-            mask = imresize(255.0 * mask, (self.mask_size, self.mask_size), mode='constant')
-            mask = torch.from_numpy((mask > 128).astype(np.int64))
-            masks.append(mask)
-
-            origin_mask = imresize(255.0 * origin_mask, (H, W), mode='constant')
-            origin_mask = torch.from_numpy((origin_mask > 128).astype(np.int64))
-            origin_masks.append(origin_mask)
-
-        objs = torch.LongTensor(objs)
-        boxes = torch.stack(boxes, dim=0)
-        masks = torch.stack(masks, dim=0)
-        origin_masks = torch.stack(origin_masks, dim=0)
-        cropped_obj_images = torch.stack(cropped_obj_images, dim=0)
-
-        box_areas = (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
-        # # Compute centers of all objects
-        # obj_centers = []
-        # _, MH, MW = masks.size()
-        # for i, obj_idx in enumerate(objs):
-        #     x0, y0, x1, y1 = boxes[i]
-        #     mask = (masks[i] == 1)
-        #     xs = torch.linspace(x0, x1, MW).view(1, MW).expand(MH, MW)
-        #     ys = torch.linspace(y0, y1, MH).view(MH, 1).expand(MH, MW)
-        #     if mask.sum() == 0:
-        #         mean_x = 0.5 * (x0 + x1)
-        #         mean_y = 0.5 * (y0 + y1)
-        #     else:
-        #         mean_x = xs[mask].mean()
-        #         mean_y = ys[mask].mean()
-        #     obj_centers.append([mean_x, mean_y])
-        # obj_centers = torch.FloatTensor(obj_centers)
-
-        # padding
-        max_length = self.max_objects_per_image + 2
-        cur_length = objs.shape[0]
-        padding_obj_idx = self.vocab['object_name_to_idx']['__null__']
-
-        padded_origin_masks = torch.zeros([max_length, *origin_masks.shape[1:]]).long()
-        padded_origin_masks[:cur_length] = origin_masks.clone()
-
-        padded_objs = torch.LongTensor(max_length).fill_(padding_obj_idx)
-        padded_objs[:cur_length] = objs.clone()
-
-        padded_boxes = torch.zeros([max_length, 4])
-        padded_boxes[:cur_length] = boxes.clone()
-
-        padded_masks = torch.zeros([max_length, *masks.shape[1:]]).long()
-        padded_masks[:cur_length] = masks.clone()
-
-        padded_cropped_obj_images = torch.zeros([max_length, *cropped_obj_images.shape[1:]])
-        padded_cropped_obj_images[:cur_length] = cropped_obj_images.clone()
-
-        is_valid_obj = torch.FloatTensor([1.0] * cur_length + [0.0] * (max_length - cur_length))
-
-        return image, padded_objs, padded_boxes, padded_masks, padded_cropped_obj_images, is_valid_obj, filename.split('.')[0]
-
-
-def seg_to_mask(seg, width=1.0, height=1.0):
-    """
-    Tiny utility for decoding segmentation masks using the pycocotools API.
-    """
-    if type(seg) == list:
-        rles = mask_utils.frPyObjects(seg, height, width)
-        rle = mask_utils.merge(rles)
-    elif type(seg['counts']) == list:
-        rle = mask_utils.frPyObjects(seg, height, width)
-    else:
-        rle = seg
-    return mask_utils.decode(rle)
+        return self.transform(image), meta_data
 
 
 def coco_collate_fn_for_layout(batch):
@@ -428,35 +458,20 @@ def coco_collate_fn_for_layout(batch):
     - is_valid_obj: FloatTensor of shape (N, L)
     """
 
-    all_imgs, all_padded_objs, all_padded_boxes, all_padded_masks, all_padded_cropped_obj_images = [], [], [], [], []
-    all_is_valid_objs, all_filenames = [], []
+    all_meta_data = defaultdict(list)
+    all_imgs = []
 
-    for i, (img, padded_objs, padded_boxes, padded_masks, padded_cropped_obj_images, is_valid_objs, filename) in enumerate(batch):
+    for i, (img, meta_data) in enumerate(batch):
         all_imgs.append(img[None])
-        all_padded_objs.append(padded_objs)
-        all_padded_boxes.append(padded_boxes)
-        all_padded_masks.append(padded_masks)
-        all_padded_cropped_obj_images.append(padded_cropped_obj_images)
-        all_is_valid_objs.append(is_valid_objs)
-        all_filenames.append(filename)
+        for key, value in meta_data.items():
+            all_meta_data[key].append(value)
 
     all_imgs = torch.cat(all_imgs)
-    all_padded_objs = torch.stack(all_padded_objs)
-    all_padded_boxes = torch.stack(all_padded_boxes)
-    all_padded_masks = torch.stack(all_padded_masks)
-    all_padded_cropped_obj_images = torch.stack(all_padded_cropped_obj_images)
-    all_is_valid_objs = torch.stack(all_is_valid_objs)
+    for key, value in all_meta_data.items():
+        if key in ['obj_bbox', 'obj_class', 'is_valid_obj'] or key.startswith('labels_from_layout_to_image_at_resolution'):
+            all_meta_data[key] = torch.stack(value)
 
-    out_dict = {
-        'obj_class': all_padded_objs,
-        'obj_box': all_padded_boxes,
-        'obj_mask': all_padded_masks,
-        'obj_image': all_padded_cropped_obj_images,  # (N, L, 3, H, W),
-        'is_valid_obj': all_is_valid_objs,  # (N, L)
-        'filename': all_filenames
-    }
-
-    return all_imgs, out_dict
+    return all_imgs, all_meta_data
 
 
 def build_coco_dsets(cfg, mode='train'):
@@ -481,7 +496,12 @@ def build_coco_dsets(cfg, mode='train'):
         instances_json=os.path.join(params.root_dir, params[mode].instances_json),
         stuff_json=os.path.join(params.root_dir, params[mode].stuff_json),
         max_num_samples=params[mode].max_num_samples,
-        left_right_flip=params[mode].left_right_flip
+        left_right_flip=params[mode].left_right_flip,
+        use_MinIoURandomCrop=params[mode].use_MinIoURandomCrop,
+        return_obj_region=params[mode].return_obj_region,
+        resolutions_to_return_obj_region=params[mode].resolutions_to_return_obj_region,
+        return_origin_image=params.return_origin_image,
+        specific_image_ids=params[mode].specific_image_ids
     )
 
     num_objs = dataset.total_objects()

@@ -18,15 +18,23 @@ def build_loaders(cfg, mode='train'):
     else:
         raise NotImplementedError
 
+    is_distributed = False
+    if dist.is_initialized() and dist.get_world_size() > 1:
+        is_distributed = True
+
+
     loader_kwargs = {
         'batch_size': params[mode].batch_size,
         'num_workers': params.loader_num_workers,
-        'shuffle': params[mode].shuffle,
+        'shuffle': params[mode].shuffle if not is_distributed else False,
         'collate_fn': collate_fn,
     }
-    if mode == 'test' and dist.is_initialized() and dist.get_world_size() > 1:
-        test_sampler = DistributedSampler(dataset)
-        loader_kwargs['sampler'] = test_sampler
+    if is_distributed:
+        if mode == 'train':
+            sampler = DistributedSampler(dataset)
+        else:
+            sampler = DistributedSampler(dataset, shuffle=False)
+        loader_kwargs['sampler'] = sampler
 
     data_loader = DataLoader(dataset, **loader_kwargs)
     return data_loader

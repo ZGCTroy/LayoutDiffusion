@@ -27,25 +27,19 @@ from .util import get_obj_from_str
 
 
 def build_model(cfg):
-    try:
-        layout_encoder = get_obj_from_str(cfg.model.parameters.layout_encoder.type)(
-            layout_length=cfg.data.parameters.layout_length,
-            num_classes_for_layout_object=cfg.data.parameters.num_classes_for_layout_object,
-            mask_size_for_layout_object=cfg.data.parameters.mask_size_for_layout_object,
-            **cfg.model.parameters.layout_encoder.parameters
-        )
-    except:
-        raise NotImplementedError
+    layout_encoder = get_obj_from_str(cfg.model.parameters.layout_encoder.type)(
+        layout_length=cfg.data.parameters.layout_length,
+        num_classes_for_layout_object=cfg.data.parameters.num_classes_for_layout_object,
+        mask_size_for_layout_object=cfg.data.parameters.mask_size_for_layout_object,
+        **cfg.model.parameters.layout_encoder.parameters
+    )
 
-    try:
-        model_kwargs = dict(**cfg.model.parameters)
-        model_kwargs.pop('layout_encoder')
-        return get_obj_from_str(cfg.model.type)(
-            layout_encoder=layout_encoder,
-            **model_kwargs,
-        )
-    except:
-        raise NotImplementedError
+    model_kwargs = dict(**cfg.model.parameters)
+    model_kwargs.pop('layout_encoder')
+    return get_obj_from_str(cfg.model.type)(
+        layout_encoder=layout_encoder,
+        **model_kwargs,
+    )
 
 
 class SiLU(nn.Module):  # export-friendly version of SiLU()
@@ -104,13 +98,13 @@ class TimestepEmbedSequential(nn.Sequential, TimestepBlock):
     support it as an extra input.
     """
 
-    def forward(self, x, emb, encoder_out=None):
+    def forward(self, x, emb, cond_kwargs=None):
         extra_output = None
         for layer in self:
             if isinstance(layer, TimestepBlock):
                 x = layer(x, emb)
-            elif isinstance(layer, AttentionBlock):
-                x, extra_output = layer(x, encoder_out)
+            elif isinstance(layer, (AttentionBlock, ObjectAwareCrossAttention)):
+                x, extra_output = layer(x, cond_kwargs)
             else:
                 x = layer(x)
         return x, extra_output
@@ -305,9 +299,21 @@ class AttentionBlock(nn.Module):
             use_checkpoint=False,
             encoder_channels=None,
             reconstruct_object_image=False,
-            reconstruct_size=1
+            reconstruct_size=1,
+            return_attention_embeddings=False,
+            return_embeddings_for_layout_image_contrastive_loss=False,
+            ds=None,
+            resolution=None,
+            type=None,
+            use_positional_embedding=False
     ):
         super().__init__()
+        self.type = type
+        self.ds = ds
+        self.resolution = resolution
+        self.return_attention_embeddings = return_attention_embeddings
+        self.return_embeddings_for_layout_image_contrastive_loss = return_embeddings_for_layout_image_contrastive_loss
+
         self.channels = channels
         if num_head_channels == -1:
             self.num_heads = num_heads
@@ -316,6 +322,13 @@ class AttentionBlock(nn.Module):
                     channels % num_head_channels == 0
             ), f"q,k,v channels {channels} is not divisible by num_head_channels {num_head_channels}"
             self.num_heads = channels // num_head_channels
+
+        self.use_positional_embedding = use_positional_embedding
+        if self.use_positional_embedding:
+            self.positional_embedding = nn.Parameter(th.randn(channels // self.num_heads, resolution ** 2) / channels ** 0.5)  # [C,L1]
+        else:
+            self.positional_embedding = None
+
         self.use_checkpoint = use_checkpoint
         self.norm = normalization(channels)
 
@@ -325,6 +338,7 @@ class AttentionBlock(nn.Module):
 
         self.attention = QKVAttentionLegacy(self.num_heads)
 
+        self.encoder_channels = encoder_channels
         if encoder_channels is not None:
             self.encoder_kv = conv_nd(1, encoder_channels, channels * 2, 1)
 
@@ -339,30 +353,76 @@ class AttentionBlock(nn.Module):
                     zero_module(conv_nd(1, channels, reconstruct_size * reconstruct_size * 3, 1))
                 )
 
+            if self.return_embeddings_for_layout_image_contrastive_loss:
+                self.layout_embedding_projector = nn.Sequential(
+                    conv_nd(1, encoder_channels, 128, 1),
+                    nn.ReLU(),
+                    conv_nd(1, 128, 128, 1)
+                )
+                self.image_embedding_projector = nn.Sequential(
+                    conv_nd(1, channels, 128, 1),
+                    nn.ReLU(),
+                    conv_nd(1, 128, 128, 1)
+                )
+                self.temperature = nn.Parameter(torch.FloatTensor([1.0]))
+
         self.proj_out = zero_module(conv_nd(1, channels, channels, 1))
 
-    def forward(self, x, encoder_out=None):
+    def forward(self, x, cond_kwargs=None):
         '''
-        :param x:
-        :param encoder_out:
+        :param x: (N, C, H, W)
+        :param cond_kwargs['xf_out']: (N, C, L2)
         :return:
             extra_output: N x L2 x 3 x ds x ds
         '''
         extra_output = None
         b, c, *spatial = x.shape
-        x = x.reshape(b, c, -1)
+        x = x.reshape(b, c, -1)  # N x C x (HxW)
+
         qkv = self.qkv(self.norm(x))  # N x 3C x L1, 其中L1=H*W
-        if encoder_out is not None:
-            kv_for_encoder_out = self.encoder_kv(encoder_out)  # encoder_out: (N x encoder_channels x L2) -> (N x 2C x L2), 其中L2=max_obj_num
-            h = self.attention(qkv, kv_for_encoder_out)
+        if cond_kwargs is not None and self.encoder_channels is not None:
+            kv_for_encoder_out = self.encoder_kv(cond_kwargs['xf_out'])  # xf_out: (N x encoder_channels x L2) -> (N x 2C x L2), 其中L2=max_obj_num
+            h = self.attention(qkv, kv_for_encoder_out, positional_embedding=self.positional_embedding)
         else:
-            h = self.attention(qkv)
+            h = self.attention(qkv, positional_embedding=self.positional_embedding)
         h = self.proj_out(h)
         output = (x + h).reshape(b, c, *spatial)
 
+        if self.return_attention_embeddings:
+            assert cond_kwargs is not None
+            if extra_output is None:
+                extra_output = {}
+            extra_output.update({
+                'type': self.type,
+                'ds': self.ds,
+                'resolution': self.resolution,
+                'num_heads': self.num_heads,
+                'num_channels': self.channels,
+                'image_query_embeddings': qkv[:, :self.channels, :].detach(),  # N x C x L1
+            })
+            if cond_kwargs is not None:
+                extra_output.update({
+                    'layout_key_embeddings': kv_for_encoder_out[:, : self.channels, :].detach()  # N x C x L2
+                })
+
+        if self.return_embeddings_for_layout_image_contrastive_loss:
+            assert cond_kwargs is not None
+            if extra_output is None:
+                extra_output = {}
+            extra_output.update({
+                'type': self.type,
+                'ds': self.ds,
+                'resolution': self.resolution,
+                'num_heads': self.num_heads,
+                'num_channels': self.channels,
+                'temperature': self.temperature,
+                'image_embeddings': self.image_embedding_projector(x),  # N x C x (HxW) --> N x 128 x (HxW)
+                'layout_embeddings': self.layout_embedding_projector(cond_kwargs['xf_out'])  # N x C x L2 --> N x 128 x L2
+            })
+
         if self.reconstruct_object_image:
-            assert encoder_out is not None
-            object_q = self.q_for_object(encoder_out)  # encoder_out: (N x encoder_channels x L2) -> (N x C x L2), 其中L2=max_obj_num
+            assert cond_kwargs is not None
+            object_q = self.q_for_object(cond_kwargs['xf_out'])  # xf_out: (N x encoder_channels x L2) -> (N x C x L2), 其中L2=max_obj_num
             bs, width, length = object_q.shape
             assert width % self.num_heads == 0
             ch = width // self.num_heads
@@ -379,6 +439,206 @@ class AttentionBlock(nn.Module):
             extra_output = self.proj_out_for_obj(extra_output)  # N x C x L2 -> N x (3*ds*ds) x L2
             extra_output = extra_output.permute(0, 2, 1)  # N x (ds*ds*3) x L2 -> N x L2 x (3*ds*ds)
             extra_output = extra_output.reshape(extra_output.shape[0], extra_output.shape[1], 3, self.reconstruct_size, self.reconstruct_size)
+
+        return output, extra_output
+
+
+
+class ObjectAwareCrossAttention(nn.Module):
+    """
+    An attention block that allows spatial positions to attend to each other.
+
+    Originally ported from here, but adapted to the N-d case.
+    https://github.com/hojonathanho/diffusion/blob/1e0dceb3b3495bbe19116a5e1b3596cd0706c543/diffusion_tf/models/unet.py#L66.
+    """
+
+    def __init__(
+            self,
+            channels,
+            num_heads=1,
+            num_head_channels=-1,
+            use_checkpoint=False,
+            encoder_channels=None,
+            reconstruct_object_image=False,
+            reconstruct_size=1,
+            return_attention_embeddings=False,
+            return_embeddings_for_layout_image_contrastive_loss=False,
+            ds=None,
+            resolution=None,
+            type=None,
+            use_positional_embedding=True
+    ):
+        super().__init__()
+
+        self.type = type
+        self.ds = ds
+        self.resolution = resolution
+        self.return_attention_embeddings = return_attention_embeddings
+        self.return_embeddings_for_layout_image_contrastive_loss = return_embeddings_for_layout_image_contrastive_loss
+
+        self.channels = channels
+        if num_head_channels == -1:
+            self.num_heads = num_heads
+        else:
+            assert (
+                    channels % num_head_channels == 0
+            ), f"q,k,v channels {channels} is not divisible by num_head_channels {num_head_channels}"
+            self.num_heads = channels // num_head_channels
+
+        self.use_positional_embedding = use_positional_embedding
+        assert self.use_positional_embedding
+
+        self.use_checkpoint = use_checkpoint
+
+        self.qkv_projector = conv_nd(1, channels, 3 * channels, 1)
+        self.norm_for_qkv = normalization(channels)
+
+        if encoder_channels is not None:
+            self.layout_content_embedding_projector = conv_nd(1, encoder_channels, channels * 2, 1)
+            self.layout_position_embedding_projector = conv_nd(1, encoder_channels, channels, 1)
+            self.norm_for_obj_class_embedding = normalization(encoder_channels)
+            self.norm_for_layout_positional_embedding = normalization(channels)
+            self.norm_for_image_patch_positional_embedding = normalization(channels)
+
+            if self.return_embeddings_for_layout_image_contrastive_loss:
+                self.temperature = nn.Parameter(torch.FloatTensor([1.0]))
+
+        self.proj_out = zero_module(conv_nd(1, channels, channels, 1))
+
+        # self.multi_head_attention = nn.MultiheadAttention(
+        #     embed_dim=channels,
+        #     kdim=channels,
+        #     vdim=channels,
+        #     num_heads=self.num_heads,
+        #     batch_first=True
+        # )
+
+    def forward(self, x, cond_kwargs):
+        '''
+        :param x: (N, C, H, W)
+        :param cond_kwargs['xf_out']: (N, C, L2)
+        :return:
+            extra_output: N x L2 x 3 x ds x ds
+        '''
+        extra_output = None
+        b, c, *spatial = x.shape
+        x = x.reshape(b, c, -1)  # N x C x (HxW)
+
+        qkv = self.qkv_projector(self.norm_for_qkv(x))  # N x 3C x L1, 其中L1=H*W
+        bs, C, L1, L2 = qkv.shape[0], self.channels, qkv.shape[2], cond_kwargs['obj_bbox_embedding'].shape[-1]
+
+        # positional embedding for image patch
+        image_patch_positional_embedding = self.layout_position_embedding_projector(
+            cond_kwargs['image_patch_bbox_embedding_for_resolution{}'.format(self.resolution)]
+        )  # N x C x L1, 其中L1=H*W
+        image_patch_positional_embedding = self.norm_for_image_patch_positional_embedding(image_patch_positional_embedding)  # (N, C, L1)
+        image_patch_positional_embedding = image_patch_positional_embedding.reshape(bs * self.num_heads, C // self.num_heads, L1)  # (N // num_heads, C // num_heads, L1)
+
+        # content embedding for image patch
+        q_image_patch_content_embedding, k_image_patch_content_embedding, v_image_patch_content_embedding = qkv.split(C, dim=1)  # 3 x (N , C, L1)
+        q_image_patch_content_embedding = q_image_patch_content_embedding.reshape(bs * self.num_heads, C // self.num_heads, L1)  # (N // num_heads, C // num_heads, L1)
+        k_image_patch_content_embedding = k_image_patch_content_embedding.reshape(bs * self.num_heads, C // self.num_heads, L1)  # (N // num_heads, C // num_heads, L1)
+        v_image_patch_content_embedding = v_image_patch_content_embedding.reshape(bs * self.num_heads, C // self.num_heads, L1)  # (N // num_heads, C // num_heads, L1)
+
+        # embedding for image patch
+        q_image_patch = torch.cat([q_image_patch_content_embedding, image_patch_positional_embedding], dim=1)  # (N // num_heads, 2 * C // num_heads, L1)
+        k_image_patch = torch.cat([k_image_patch_content_embedding, image_patch_positional_embedding], dim=1)  # (N // num_heads, 2 * C // num_heads, L1)
+        v_image_patch = v_image_patch_content_embedding  # (N // num_heads, C // num_heads, L1)
+
+        # positional embedding for layout
+        layout_positional_embedding = self.layout_position_embedding_projector(cond_kwargs['obj_bbox_embedding'])  # N x C x L2
+        layout_positional_embedding = self.norm_for_layout_positional_embedding(layout_positional_embedding)  # (N, C, L2)
+        layout_positional_embedding = layout_positional_embedding.reshape(bs * self.num_heads, C // self.num_heads, L2)  # (N // num_heads, C // num_heads, L2)
+
+        # content embedding for layout
+        layout_content_embedding = (cond_kwargs['xf_out'] + self.norm_for_obj_class_embedding(cond_kwargs['obj_class_embedding'])) / 2
+        k_layout_content_embedding, v_layout_content_embedding = self.layout_content_embedding_projector(layout_content_embedding).split(C, dim=1)  # 2 x (N x C x L2)
+        k_layout_content_embedding = k_layout_content_embedding.reshape(bs * self.num_heads, C // self.num_heads, L2)  # (N // num_heads, C // num_heads, L2)
+        v_layout_content_embedding = v_layout_content_embedding.reshape(bs * self.num_heads, C // self.num_heads, L2)  # (N // num_heads, C // num_heads, L2)
+
+        # embedding for layout
+        k_layout = torch.cat([k_layout_content_embedding, layout_positional_embedding], dim=1)  # (N // num_heads, 2 * C // num_heads, L2)
+        v_layout = v_layout_content_embedding  # (N // num_heads, C // num_heads, L2)
+
+        #  mix embedding for cross attention
+        k_mix = th.cat([k_image_patch, k_layout], dim=2)  # (N // num_heads, 2 * C // num_heads, L1+L2)
+        v_mix = th.cat([v_image_patch, v_layout], dim=2)  # (N // num_heads, 1 * C // num_heads, L1+L2)
+
+        #  cross multihead attention
+        # attn_output, attn_output_weights = self.multi_head_attention(
+        #     query=q_image_patch,
+        #     key=k_mix,
+        #     value=v_mix,
+        #     key_padding_mask=cond_kwargs['key_padding_mask'],
+        #     need_weights=True
+        # )
+
+        key_padding_mask = torch.cat(
+            [
+                torch.zeros((bs, L1), device=cond_kwargs['key_padding_mask'].device).bool(),  # (N, L1)
+                cond_kwargs['key_padding_mask']  # (N, L2)
+            ],
+            dim=1
+        )  # (N, L1+L2)
+
+        scale = 1 / math.sqrt(math.sqrt(2 * C // self.num_heads))
+        attn_output_weights = th.einsum(
+            "bct,bcs->bts", q_image_patch * scale, k_mix * scale
+        )  # More stable with f16 than dividing afterwards, (N x num_heads, L1, L1+L2)
+
+        attn_output_weights = attn_output_weights.view(bs, self.num_heads, L1, L1 + L2)
+
+        attn_output_weights = attn_output_weights.masked_fill(
+            key_padding_mask.unsqueeze(1).unsqueeze(2), # (N, 1, 1, L1+L2)
+            float('-inf'),
+        )
+        attn_output_weights = attn_output_weights.view(bs * self.num_heads, L1, L1 + L2)
+
+
+        attn_output_weights = th.softmax(attn_output_weights.float(), dim=-1).type(attn_output_weights.dtype) # (N x num_heads, L1, L1+L2)
+
+        attn_output = th.einsum("bts,bcs->bct", attn_output_weights, v_mix)  # (N x num_heads, C // num_heads, L1)
+        attn_output = attn_output.reshape(bs, C, L1)  # (N, C, L1)
+
+        #
+        h = self.proj_out(attn_output)
+
+        output = (x + h).reshape(b, c, *spatial)
+
+        if self.return_attention_embeddings:
+            assert cond_kwargs is not None
+            if extra_output is None:
+                extra_output = {}
+            extra_output.update({
+                'type': self.type,
+                'ds': self.ds,
+                'resolution': self.resolution,
+                'num_heads': self.num_heads,
+                'num_channels': self.channels,
+                'image_query_embeddings': image_patch_positional_embedding.detach().view(bs, -1, L1),  # N x C x L1
+                # 'image_query_embeddings': qkv[:, :self.channels, :].detach(),  # N x C x L1
+            })
+            if cond_kwargs is not None:
+                extra_output.update({
+                    'layout_key_embeddings': layout_positional_embedding.detach().view(bs, -1, L2)  # N x C x L2
+
+                    # 'layout_key_embeddings': kv_for_encoder_out[:, : self.channels, :].detach()  # N x C x L2
+                })
+
+        if self.return_embeddings_for_layout_image_contrastive_loss:
+            assert cond_kwargs is not None
+            if extra_output is None:
+                extra_output = {}
+            extra_output.update({
+                'type': self.type,
+                'ds': self.ds,
+                'resolution': self.resolution,
+                'num_heads': self.num_heads,
+                'num_channels': self.channels,
+                'temperature': self.temperature,
+                'image_embeddings': image_patch_positional_embedding.reshape(bs, self.num_heads * ch, L1),  # N x C x (HxW) --> N x 128 x (HxW)
+                'layout_embeddings': layout_positional_embedding.reshape(bs, self.num_heads * ch, L2)  # N x C x L2 --> N x 128 x L2
+            })
 
         return output, extra_output
 
@@ -403,36 +663,6 @@ def count_flops_attn(model, _x, y):
     model.total_ops += th.DoubleTensor([matmul_ops])
 
 
-class QKVCrossAttentionLegacyForLayoutAndImage(nn.Module):
-    """
-    A module which performs QKV attention with Layout. Matches legacy QKVAttention + input/ouput heads shaping
-    """
-
-    def __init__(self, n_heads):
-        super().__init__()
-        self.n_heads = n_heads
-
-    def forward(self, q, k, v):
-        """
-        Apply QKV attention with Layout.
-
-        :param qkv: an [N x (H * 3 * C) x T] tensor of Qs, Ks, and Vs.
-        :return: an [N x (H * C) x T] tensor after attention.
-        """
-        bs, ch, length = q.shape[0] // self.n_heads, q.shape[1], q.shape[2]
-
-        scale = 1 / math.sqrt(math.sqrt(ch))
-        weight = th.einsum(
-            "bct,bcs->bts", q * scale, k * scale
-        )  # More stable with f16 than dividing afterwards
-        weight = th.softmax(weight.float(), dim=-1).type(weight.dtype)
-        a = th.einsum("bts,bcs->bct", weight, v)
-        return a.reshape(bs, self.n_heads * ch, length)
-
-    @staticmethod
-    def count_flops(model, _x, y):
-        return count_flops_attn(model, _x, y)
-
 
 class QKVAttentionLegacy(nn.Module):
     """
@@ -443,17 +673,23 @@ class QKVAttentionLegacy(nn.Module):
         super().__init__()
         self.n_heads = n_heads
 
-    def forward(self, qkv, encoder_kv=None):
+    def forward(self, qkv, encoder_kv=None, positional_embedding=None):
         """
         Apply QKV attention.
 
-        :param qkv: an [N x (H * 3 * C) x T] tensor of Qs, Ks, and Vs.
+        :param qkv: an [N x (H * 3 * C) x T] tensor of Q_T, K_T, and V_T.
+        :param encoder_kv: an [N x (H * 2 * C) x S] tensor of K_E, and V_E.
         :return: an [N x (H * C) x T] tensor after attention.
         """
         bs, width, length = qkv.shape
         assert width % (3 * self.n_heads) == 0
         ch = width // (3 * self.n_heads)
         q, k, v = qkv.reshape(bs * self.n_heads, ch * 3, length).split(ch, dim=1)
+
+        if positional_embedding is not None:
+            q = q + positional_embedding[None, :, :].to(q.dtype)  # [N, C, T]
+            k = k + positional_embedding[None, :, :].to(q.dtype)  # [N, C, T]
+
         if encoder_kv is not None:
             assert encoder_kv.shape[1] == self.n_heads * ch * 2
             ek, ev = encoder_kv.reshape(bs * self.n_heads, ch * 2, -1).split(ch, dim=1)
@@ -537,8 +773,26 @@ class LayoutDiffusionUNetModel(nn.Module):
             num_heads_upsample=-1,
             use_scale_shift_norm=False,
             resblock_updown=False,
+            ds_to_return_attention_embeddings=[],
+            ds_to_return_layout_image_embeddings_for_contrastive_loss=[],
+            use_positional_embedding_for_attention=False,
+            image_size=256,
+            attention_block_type='GLIDE',
+            num_attention_blocks=1
     ):
         super().__init__()
+        self.num_attention_blocks = num_attention_blocks
+        self.attention_block_type = attention_block_type
+        if self.attention_block_type == 'GLIDE':
+            attention_block_fn = AttentionBlock
+        elif self.attention_block_type == 'ObjectAwareCrossAttention':
+            attention_block_fn = ObjectAwareCrossAttention
+
+        self.image_size = image_size
+        self.use_positional_embedding_for_attention = use_positional_embedding_for_attention
+        self.ds_to_return_attention_embeddings = ds_to_return_attention_embeddings
+        self.ds_to_return_layout_image_embeddings_for_contrastive_loss = ds_to_return_layout_image_embeddings_for_contrastive_loss
+
         self.layout_encoder = layout_encoder
         self.reconstruct_object_image = reconstruct_object_image
         self.reconstruct_size = reconstruct_size
@@ -591,15 +845,22 @@ class LayoutDiffusionUNetModel(nn.Module):
                 ]
                 ch = int(mult * model_channels)
                 if ds in attention_ds:
-                    layers.append(
-                        AttentionBlock(
-                            ch,
-                            use_checkpoint=use_checkpoint,
-                            num_heads=num_heads,
-                            num_head_channels=num_head_channels,
-                            encoder_channels=encoder_channels
+                    for _ in range(self.num_attention_blocks):
+                        layers.append(
+                            attention_block_fn(
+                                ch,
+                                use_checkpoint=use_checkpoint,
+                                num_heads=num_heads,
+                                num_head_channels=num_head_channels,
+                                encoder_channels=encoder_channels,
+                                return_attention_embeddings=True if ds in self.ds_to_return_attention_embeddings else False,
+                                return_embeddings_for_layout_image_contrastive_loss=True if ds in self.ds_to_return_layout_image_embeddings_for_contrastive_loss else False,
+                                ds=ds,
+                                resolution=int(self.image_size // ds),
+                                type='input',
+                                use_positional_embedding=self.use_positional_embedding_for_attention
+                            )
                         )
-                    )
                 self.input_blocks.append(TimestepEmbedSequential(*layers))
                 self._feature_size += ch
                 input_block_chans.append(ch)
@@ -637,12 +898,18 @@ class LayoutDiffusionUNetModel(nn.Module):
                 use_checkpoint=use_checkpoint,
                 use_scale_shift_norm=use_scale_shift_norm,
             ),
-            AttentionBlock(
+            attention_block_fn(
                 ch,
                 use_checkpoint=use_checkpoint,
                 num_heads=num_heads,
                 num_head_channels=num_head_channels,
-                encoder_channels=encoder_channels
+                encoder_channels=encoder_channels,
+                return_attention_embeddings=True if ds in self.ds_to_return_attention_embeddings else False,
+                return_embeddings_for_layout_image_contrastive_loss=False,
+                ds=ds,
+                resolution=int(self.image_size // ds),
+                type='middle',
+                use_positional_embedding=self.use_positional_embedding_for_attention
             ),
             ResBlock(
                 ch,
@@ -676,18 +943,24 @@ class LayoutDiffusionUNetModel(nn.Module):
                         reconstruct_object_image_flag = True
                     else:
                         reconstruct_object_image_flag = False
-
-                    layers.append(
-                        AttentionBlock(
-                            ch,
-                            use_checkpoint=use_checkpoint,
-                            num_heads=num_heads_upsample,
-                            num_head_channels=num_head_channels,
-                            encoder_channels=encoder_channels,
-                            reconstruct_object_image=reconstruct_object_image_flag,
-                            reconstruct_size=reconstruct_size
+                    for _ in range(self.num_attention_blocks):
+                        layers.append(
+                            attention_block_fn(
+                                ch,
+                                use_checkpoint=use_checkpoint,
+                                num_heads=num_heads_upsample,
+                                num_head_channels=num_head_channels,
+                                encoder_channels=encoder_channels,
+                                reconstruct_object_image=reconstruct_object_image_flag,
+                                reconstruct_size=reconstruct_size,
+                                return_attention_embeddings=True if ds in self.ds_to_return_attention_embeddings else False,
+                                return_embeddings_for_layout_image_contrastive_loss=False,
+                                ds=ds,
+                                resolution=int(self.image_size // ds),
+                                type='output',
+                                use_positional_embedding=self.use_positional_embedding_for_attention
+                            )
                         )
-                    )
                 if level and i == num_res_blocks:
                     out_ch = ch
                     layers.append(
@@ -724,28 +997,33 @@ class LayoutDiffusionUNetModel(nn.Module):
         self.output_blocks.apply(convert_module_to_f16)
         self.layout_encoder.convert_to_fp16()
 
-    def forward(self, x, timesteps, obj_class=None, obj_box=None, obj_mask=None, **kwargs):
+    def forward(self, x, timesteps, obj_class=None, obj_bbox=None, obj_mask=None, is_valid_obj=None, **kwargs):
         hs, extra_outputs = [], []
 
         emb = self.time_embed(timestep_embedding(timesteps, self.model_channels))
 
-        layout_outputs = self.layout_encoder(obj_class, obj_box, obj_mask)
+        layout_outputs = self.layout_encoder(
+            obj_class=obj_class,
+            obj_bbox=obj_bbox,
+            obj_mask=obj_mask,
+            is_valid_obj=is_valid_obj
+        )
         xf_proj, xf_out = layout_outputs["xf_proj"], layout_outputs["xf_out"]
 
         emb = emb + xf_proj.to(emb)
 
         h = x.type(self.dtype)
         for module in self.input_blocks:
-            h, extra_output = module(h, emb, xf_out)
+            h, extra_output = module(h, emb, layout_outputs)
             if extra_output is not None:
                 extra_outputs.append(extra_output)
             hs.append(h)
-        h, extra_output = self.middle_block(h, emb, xf_out)
+        h, extra_output = self.middle_block(h, emb, layout_outputs)
         if extra_output is not None:
             extra_outputs.append(extra_output)
         for module in self.output_blocks:
             h = th.cat([h, hs.pop()], dim=1)
-            h, extra_output = module(h, emb, xf_out)
+            h, extra_output = module(h, emb, layout_outputs)
             if extra_output is not None:
                 extra_outputs.append(extra_output)
         h = h.type(x.dtype)

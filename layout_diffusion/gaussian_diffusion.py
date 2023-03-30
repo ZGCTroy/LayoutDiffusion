@@ -13,8 +13,9 @@ import torch.nn
 import torch.nn.functional as F
 
 from .losses import normal_kl, discretized_gaussian_log_likelihood
-from layout_diffusion.dataset.util import get_cropped_image
+from layout_diffusion.dataset.util import get_cropped_image, get_contrastive_layout_and_image_batch_labels
 from .nn import mean_flat
+from . import dist_util
 
 
 def get_named_beta_schedule(schedule_name, num_diffusion_timesteps):
@@ -75,7 +76,7 @@ class GaussianDiffusion:
                   starting at T and going to 1.
     :param model_mean_type: a ModelMeanType determining what the model outputs.
     :param model_var_type: a ModelVarType determining how variance is output.
-    :param loss_type: a LossType determining the loss function to use.
+    :param loss_type: a list of LossType determining the loss function to use.
     """
 
     def __init__(
@@ -218,6 +219,9 @@ class GaussianDiffusion:
         B, C = x.shape[:2]
         assert t.shape == (B,)
         model_output, extra_outputs = model(x, t, **model_kwargs)
+        results.update({
+            'extra_outputs': extra_outputs
+        })
 
         if self.model_var_type in ['LEARNED', 'LEARNED_RANGE']:
             assert model_output.shape == (B, C * 2, *x.shape[2:]), print(model_output.shape)
@@ -278,7 +282,7 @@ class GaussianDiffusion:
                 extra_means, extra_log_variances = [], []
                 for extra_output in extra_outputs:
                     cropped_xt = get_cropped_image(
-                        obj_boxes=model_kwargs['obj_box'],
+                        obj_bboxes=model_kwargs['obj_bbox'],
                         images=x,
                         image_size=x.shape[2],  # N, 3, H, W
                         cropped_size=extra_output.shape[3],  # N, L, 3, ds, ds
@@ -437,6 +441,11 @@ class GaussianDiffusion:
 
         sample = out["mean"] + nonzero_mask * th.exp(0.5 * out["log_variance"]) * noise
 
+        if 'return_attention_embeddings' in list(model_kwargs.keys()) and model_kwargs['return_attention_embeddings']:
+            results.update({
+                'extra_outputs': out['extra_outputs']
+            })
+
         if model_kwargs['reconstruct_object_image']:
 
             extra_samples = []
@@ -463,6 +472,7 @@ class GaussianDiffusion:
             model_kwargs=None,
             device=None,
             progress=True,
+            save_intermediate_interval=-1
     ):
         """
         Generate samples from the model.
@@ -484,6 +494,8 @@ class GaussianDiffusion:
         :return: a non-differentiable batch of samples.
         """
         final = None
+        all_results = []
+        step_id = 0
         for sample in self.p_sample_loop_progressive(
                 model,
                 shape,
@@ -495,8 +507,14 @@ class GaussianDiffusion:
                 device=device,
                 progress=progress,
         ):
+
             final = sample
-        return final
+            if save_intermediate_interval >0 and (step_id + 1) % save_intermediate_interval == 0:
+                all_results.append(final)
+            step_id += 1
+        if save_intermediate_interval<=0:
+            all_results.append(final)
+        return all_results
 
     def p_sample_loop_progressive(
             self,
@@ -649,6 +667,7 @@ class GaussianDiffusion:
             device=None,
             progress=True,
             eta=0.0,
+            save_intermediate_interval=-1
     ):
         """
         Generate samples from the model using DDIM.
@@ -656,6 +675,8 @@ class GaussianDiffusion:
         Same usage as p_sample_loop().
         """
         final = None
+        all_results = []
+        step_id = 0
         for sample in self.ddim_sample_loop_progressive(
                 model,
                 shape,
@@ -669,7 +690,13 @@ class GaussianDiffusion:
                 eta=eta,
         ):
             final = sample
-        return final["sample"]
+            if save_intermediate_interval >0 and (step_id + 1) % save_intermediate_interval == 0:
+                all_results.append(final)
+            step_id += 1
+
+        if save_intermediate_interval<=0:
+            all_results.append(final)
+        return all_results
 
     def ddim_sample_loop_progressive(
             self,
@@ -776,36 +803,125 @@ class GaussianDiffusion:
 
         terms = {}
 
-        assert self.loss_type == 'RESCALED_MSE'
+        assert 'RESCALED_MSE' in self.loss_type or "LAYOUT_IMAGE_MATCHING_LOSS" in self.loss_type
         assert self.model_var_type == 'LEARNED_RANGE'
         assert self.model_mean_type == 'EPSILON'
 
         model_output, extra_outputs = model(x_t, t, **model_kwargs)
 
-        B, C = x_t.shape[:2]
+        B, C, H, W = x_t.shape
         assert model_output.shape == (B, C * 2, *x_t.shape[2:])
         model_output, model_var_values = th.split(model_output, C, dim=1)
 
-        # 1. MSE
-        terms["mse"] = mean_flat((noise - model_output) ** 2)
+        terms["loss"] = 0
+        # 1. MSE + VB
+        if "RESCALED_MSE" in self.loss_type:
+            terms["mse"] = mean_flat((noise - model_output) ** 2)
 
-        # 2. VB: Learn the variance using the variational bound, but don't let
-        # it affect our mean prediction.
-        # Divide by 1000 for equivalence with initial implementation.
-        # Without a factor of 1/1000, the VB term hurts the MSE term.
-        frozen_out = [th.cat([model_output.detach(), model_var_values], dim=1), []]
-        terms["vb"] = self._vb_terms_bpd(
-            model=lambda *args, r=frozen_out: r,
-            x_start=x_start,
-            x_t=x_t,
-            t=t,
-            clip_denoised=False,
-        )["output"]
-        assert self.loss_type == 'RESCALED_MSE'
-        terms["vb"] *= self.num_timesteps / 1000.0
+            # 2. VB: Learn the variance using the variational bound, but don't let
+            # it affect our mean prediction.
+            # Divide by 1000 for equivalence with initial implementation.
+            # Without a factor of 1/1000, the VB term hurts the MSE term.
+            frozen_out = [th.cat([model_output.detach(), model_var_values], dim=1), []]
+            terms["vb"] = self._vb_terms_bpd(
+                model=lambda *args, r=frozen_out: r,
+                x_start=x_start,
+                x_t=x_t,
+                t=t,
+                clip_denoised=False,
+            )["output"]
 
-        # 3. loss
-        terms["loss"] = terms["mse"] + terms["vb"]
+            terms["vb"] *= self.num_timesteps / 1000.0
+
+
+            terms["loss"] = terms["loss"] + terms["mse"] + terms["vb"]
+
+        # 2. LAYOUT_IMAGE_MATCHING_LOSS
+        # if "LAYOUT_IMAGE_MATCHING_LOSS" in self.loss_type:
+        #     terms["ct_loss"] = 0
+        #     num_ct_loss = 0
+        #     for extra_output in extra_outputs:
+        #
+        #         # labels_from_layout_to_image = get_contrastive_layout_and_image_batch_labels(
+        #         #     obj_bbox=model_kwargs['obj_bbox'],
+        #         #     height=H,
+        #         #     width=W,
+        #         #     resolution=extra_output['resolution']
+        #         # ) # N x L2 x L1
+        #
+        #
+        #         resolution = extra_output['resolution']
+        #         image_embeddings = extra_output['image_embeddings']  # N x C x L1 = N x C x (H x W)
+        #         layout_embeddings = extra_output['layout_embeddings']  # N x C x L2
+        #
+        #         image_embeddings = torch.nn.functional.normalize(image_embeddings.permute(0, 2, 1), dim=-1, p=2) # normalized N x L1 x C
+        #         layout_embeddings = torch.nn.functional.normalize(layout_embeddings.permute(0, 2, 1), dim=-1, p=2) # normalized N x L2 x C
+        #
+        #         logits = th.einsum("btc,bsc->bts", layout_embeddings, image_embeddings) # N x L2 x L1
+        #
+        #         N, L2, L1 = logits.shape
+        #         is_valid_obj = model_kwargs['is_valid_obj'] # N x L2
+        #         labels_from_layout_to_image = model_kwargs['labels_from_layout_to_image_at_resolution{}'.format(resolution)]
+        #
+        #         layout_image_contrastive_loss = torch.nn.KLDivLoss(reduction='none')(
+        #             input = F.log_softmax(logits/extra_output['temperature'], dim=2),
+        #             target = labels_from_layout_to_image.to(dist_util.dev())
+        #         )
+        #
+        #         layout_image_contrastive_loss = is_valid_obj.view(N, L2, 1) * layout_image_contrastive_loss # N x L2 x L1
+        #
+        #         loss_name= "ct_loss_{}_ds{}".format(extra_output['type'], extra_output['ds'])
+        #         terms[loss_name] = layout_image_contrastive_loss.mean(dim=2).sum(dim=1)
+        #         terms["ct_loss"] = terms["ct_loss"] + terms[loss_name]
+        #         num_ct_loss += 1
+        #
+        #     assert num_ct_loss>0
+        #     terms["ct_loss"] = 0.1 * terms["ct_loss"] / num_ct_loss
+        #     terms["loss"] = terms["loss"] + terms["ct_loss"]
+
+        if "LAYOUT_IMAGE_MATCHING_LOSS" in self.loss_type:
+            terms["ct_loss"] = 0
+            num_ct_loss = 0
+            softmax_layer = torch.nn.Softmax(dim=2)
+            nll_loss_criterion = torch.nn.NLLLoss(reduction='none')
+            for extra_output in extra_outputs:
+
+                resolution = extra_output['resolution']
+                image_embeddings = extra_output['image_embeddings']  # N x C x L1 = N x C x (H x W)
+                layout_embeddings = extra_output['layout_embeddings']  # N x C x L2
+
+                image_embeddings = torch.nn.functional.normalize(image_embeddings.permute(0, 2, 1), dim=-1, p=2) # normalized N x L1 x C
+                layout_embeddings = torch.nn.functional.normalize(layout_embeddings.permute(0, 2, 1), dim=-1, p=2) # normalized N x L2 x C
+
+                logits = th.einsum("btc,bsc->bts", layout_embeddings, image_embeddings) # N x L2 x L1
+
+
+                N, L2, L1 = logits.shape
+                is_valid_obj = model_kwargs['is_valid_obj'] # N x L2
+                labels_from_layout_to_image = model_kwargs['labels_from_layout_to_image_at_resolution{}'.format(resolution)] # N x L2 x L1
+
+                probability = softmax_layer(logits / extra_output['temperature'] ) # N x L2 x L1
+                probability_positive = torch.sum(labels_from_layout_to_image * probability, dim=2, keepdim=True) # N x L2 x 1
+                probability_negative = torch.sum((1.0 - labels_from_layout_to_image) * probability, dim=2, keepdim=True) # N x L2 x 1
+                probability = torch.cat([probability_positive, probability_negative], dim=2) # N x L2 x 2
+
+                log_probability = torch.log(probability + 1e-3)  # N x L2 x 2
+
+                layout_image_contrastive_loss = nll_loss_criterion(
+                    input = log_probability.permute(0, 2, 1), # N x 2 x L2
+                    target = torch.zeros([N, L2], device=dist_util.dev()).long()
+                ) # N x L2
+
+                layout_image_contrastive_loss = is_valid_obj.view(N, L2) * layout_image_contrastive_loss # N x L2
+
+                loss_name= "ct_loss_{}_ds{}".format(extra_output['type'], extra_output['ds'])
+                terms[loss_name] = layout_image_contrastive_loss.sum(dim=1) # N
+                terms["ct_loss"] = terms["ct_loss"] + terms[loss_name]
+                num_ct_loss += 1
+
+            assert num_ct_loss>0
+            terms["ct_loss"] = 0.001 * terms["ct_loss"] / num_ct_loss
+            terms["loss"] = terms["loss"] + terms["ct_loss"]
 
         # if self.loss_type == 'RESCALED_MSE_RECONSTRUCT_OBJECT_IMAGE':
         #
@@ -816,7 +932,7 @@ class GaussianDiffusion:
         #         bs, length, _, reconstruct_size = extra_output.shape[:4]  # (N, L, 3, reconstruct_size, reconstruct_size)
         #
         #         cropped_noise_for_obj_image = get_cropped_image(
-        #             obj_boxes=model_kwargs['obj_box'],
+        #             obj_bboxes=model_kwargs['obj_bbox'],
         #             images=noise,
         #             image_size=image_size,
         #             cropped_size=reconstruct_size

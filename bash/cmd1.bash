@@ -15,6 +15,7 @@ RANK=0
 MASTER_ADDR=localhost
 MASTER_PORT=$((RANDOM + 10000))
 
+
 nohup python -m torch.distributed.launch \
        --nnodes $WORLD_SIZE \
        --node_rank $RANK \
@@ -22,5 +23,6 @@ nohup python -m torch.distributed.launch \
        --master_addr $MASTER_ADDR \
        --master_port $MASTER_PORT \
        scripts/image_train_for_layout.py \
-       --config_file ./configs/VG_256x256/LayoutDiffusion-v1.yaml \
-       > log/train_VG_256x256_LayoutDiffusion-v1.txt
+       --config_file ./configs/COCO-stuff_256x256/LayoutDiffusion-v7_small.yaml \
+       train.resume_checkpoint='./log/COCO-stuff_256x256/LayoutDiffusion-v7_small/model1600000.pt' \
+       > log/train_COCO-stuff_256x256_LayoutDiffusion-v7_small.txt

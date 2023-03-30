@@ -23,13 +23,16 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--local_rank", type=int, default=0)
     parser.add_argument("--config_file", type=str, default='./configs/LayoutDiffusion-v1.yaml')
-    args = parser.parse_args()
+    known_args, unknown_args = parser.parse_known_args()
 
-    cfg = OmegaConf.create({'cli': args.__dict__})
-    cfg = OmegaConf.merge(OmegaConf.load(cfg.cli.config_file), cfg)
+    known_args = OmegaConf.create(known_args.__dict__)
+    cfg = OmegaConf.merge(OmegaConf.load(known_args.config_file), known_args)
+    if unknown_args:
+        unknown_args = OmegaConf.from_dotlist(unknown_args)
+        cfg = OmegaConf.merge(cfg, unknown_args)
     print(OmegaConf.to_yaml(cfg))
 
-    dist_util.setup_dist(local_rank=cfg.cli.local_rank)
+    dist_util.setup_dist(local_rank=cfg.local_rank)
     logger.configure(dir=cfg.train.log_dir)
     logger.log('current rank == {}, total_num = {}, \n, {}'.format(dist.get_rank(), dist.get_world_size(), cfg))
 

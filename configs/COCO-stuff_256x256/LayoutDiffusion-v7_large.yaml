@@ -1,0 +1,178 @@
+#Changes from version 3 to version 4:
+#  1. disable layout-image contrastive learning on input attention blocks
+#  2. add layout positional embedding for attention of Unet
+#  3. use conditional detr
+
+
+model:
+  type: layout_diffusion.layout_diffusion_unet.LayoutDiffusionUNetModel
+  parameters:
+    image_size: 256
+
+    reconstruct_object_image: False
+    attention_ds_to_reconstruct_object_image: []
+    reconstruct_size: 32
+
+    use_fp16: True
+    use_scale_shift_norm: True
+    in_channels: 3
+    out_channels: 6
+    model_channels: 256
+    encoder_channels: 256 # assert same as layout_encoder.hidden_dim
+    num_head_channels: 64
+    num_heads: -1
+    num_heads_upsample: -1
+    num_res_blocks: 2
+    num_attention_blocks: 1
+    resblock_updown: True
+    attention_ds: [ 32, 16, 8 ]
+    channel_mult: [ 1, 1, 2, 2, 4, 4 ]
+    dropout: 0.0
+    use_checkpoint: False
+    
+    ds_to_return_attention_embeddings: []
+    ds_to_return_layout_image_embeddings_for_contrastive_loss: []
+    use_positional_embedding_for_attention: True
+
+    attention_block_type: 'ObjectAwareCrossAttention'
+
+
+    layout_encoder:
+      type: layout_diffusion.layout_encoder.LayoutTransformerEncoder
+      parameters:
+        used_condition_types: [
+          'obj_class', 'obj_bbox', 'is_valid_obj'
+        ]
+        hidden_dim: 256
+        output_dim: 1024 # model_channels x 4
+        num_layers: 6
+        num_heads: 8
+        use_final_ln: True
+        use_positional_embedding: False
+        resolution_to_attention: [32, 16, 8]
+        use_key_padding_mask: False
+
+
+
+diffusion:
+  type: layout_diffusion.respace.SpacedDiffusion
+  parameters:
+    model_var_type: "LEARNED_RANGE"
+    model_mean_type: "EPSILON"
+    diffusion_steps: 1000
+    noise_schedule: "linear"
+    learn_sigma: True
+    timestep_respacing: [ 1000 ]
+    loss: ["RESCALED_MSE"]
+
+schedule_sampler:
+  type: layout_diffusion.resample.UniformSampler
+
+data:
+  type: 'COCO-stuff'
+  parameters:
+    filter_mode: 'LostGAN'
+    use_deprecated_stuff2017: True
+    image_size: 256
+    layout_length: 10
+    num_classes_for_layout_object: 185
+    mask_size_for_layout_object: 32
+    loader_num_workers: 4
+    include_relationships: False
+    root_dir: '/workspace/mnt/storage/zhouxianpan/COCO-stuff'
+    instance_whitelist: null
+    stuff_whitelist: null
+    include_other: False
+    min_object_size: 0.02
+    min_objects_per_image: 3
+    max_objects_per_image: 8
+    stuff_only: True
+    used_condition_types: ['obj_class','obj_bbox']
+    return_origin_image: False
+
+    train:
+      image_dir: 'images/train2017'
+      instances_json: 'annotations/instances_train2017.json'
+      stuff_json: 'annotations/stuff_train2017.json'
+      deprecated_stuff_ids_txt: 'annotations/deprecated-challenge2017/train-ids.txt'
+      max_num_samples: null
+      specific_image_ids: []
+      shuffle: True
+      batch_size: 4           # 8 GPUs, total_batch_size=4x8=32
+      left_right_flip: True
+      use_MinIoURandomCrop: True
+      return_obj_region: False
+      resolutions_to_return_obj_region: [ ]
+
+    val:
+      image_dir: 'images/val2017'
+      instances_json: 'annotations/instances_val2017.json'
+      stuff_json: 'annotations/stuff_val2017.json'
+      deprecated_stuff_ids_txt: 'annotations/deprecated-challenge2017/val-ids.txt'
+      max_num_samples: 1024
+      specific_image_ids: []
+      shuffle: False
+      batch_size: 8
+      left_right_flip: False
+      use_MinIoURandomCrop: False
+      return_obj_region: False
+      resolutions_to_return_obj_region: [ ]
+
+    test:
+      image_dir: 'images/val2017'
+      instances_json: 'annotations/instances_val2017.json'
+      stuff_json: 'annotations/stuff_val2017.json'
+      deprecated_stuff_ids_txt: 'annotations/deprecated-challenge2017/val-ids.txt'
+      max_num_samples: null
+      specific_image_ids: [ ]
+      shuffle: False
+      batch_size: 32
+      left_right_flip: False
+      use_MinIoURandomCrop: False
+      return_obj_region: False
+      resolutions_to_return_obj_region: [ ]
+
+
+
+
+train:
+  pretrained_model_path: ''
+  resume_checkpoint: ''
+  classifier_free: True
+  classifier_free_dropout: 0.2
+  lr: 1e-5
+  ema_rate: "0.9999"
+  micro_batch_size: 1
+  save_interval: 10000
+  log_interval: 1000
+  log_dir: './log/COCO-stuff_256x256/LayoutDiffusion-v7_large'
+  use_fp16: True
+  fp16_scale_growth: 1e-3
+  weight_decay: 0.0
+  lr_anneal_steps: 0
+  find_unused_parameters: False
+  only_update_parameters_that_require_grad: False
+
+
+
+sample:
+  fix_seed: True
+  use_fp16: True
+  log_root: '/workspace/mnt/storage/guangcongzheng/zju_zgc_backup/samples/COCO-stuff_256x256/LayoutDiffusion-v7_large'
+  sample_suffix: 'model0400000'
+  pretrained_model_path: './log/COCO-stuff_256x256/LayoutDiffusion-v7_large/ema_0.9999_0400000.pt'
+  classifier_free: True
+  classifier_free_scale: 1.0
+  sample_times: 1
+  timestep_respacing: [ 200 ]
+  sample_method: 'ddpm'
+  clip_denoised: True
+  save_cropped_images: False
+  save_images_with_bboxs: False
+  save_sequence_of_obj_imgs: False
+  adaptive_step_size: False
+  rtol: 0.05
+  fast_version: True
+  eps: 1e-4
+
+

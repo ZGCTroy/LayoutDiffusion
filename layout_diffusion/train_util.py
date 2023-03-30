@@ -62,7 +62,7 @@ class TrainLoop:
             except:
                 print('not successfully load the entire model, try to load part of model')
                 model.load_state_dict(
-                    dist_util.load_state_dict(cfg.train.pretrained_model_path, map_location="cpu"),strict=False
+                    dist_util.load_state_dict(pretrained_model_path, map_location="cpu"),strict=False
                 )
 
         self.diffusion = diffusion
@@ -143,6 +143,7 @@ class TrainLoop:
 
         if resume_checkpoint:
             self.resume_step = parse_resume_step_from_filename(resume_checkpoint)
+            logger.log(f"resume step = {self.resume_step}...")
             if dist.get_rank() == 0:
                 logger.log(f"loading model from checkpoint: {resume_checkpoint}...")
                 self.model.load_state_dict(
@@ -172,10 +173,11 @@ class TrainLoop:
     def _load_optimizer_state(self):
         main_checkpoint = find_resume_checkpoint() or self.resume_checkpoint
         opt_checkpoint = bf.join(
-            bf.dirname(main_checkpoint), f"opt{self.resume_step:06}.pt"
+            bf.dirname(main_checkpoint), f"opt{self.resume_step:07}.pt"
         )
+        logger.log(f"try to load optimizer state from checkpoint: {opt_checkpoint}")
         if bf.exists(opt_checkpoint):
-            logger.log(f"loading optimizer state from checkpoint: {opt_checkpoint}")
+            logger.log(f"successfully loading optimizer state from checkpoint: {opt_checkpoint}")
             state_dict = dist_util.load_state_dict(
                 opt_checkpoint, map_location=dist_util.dev()
             )
@@ -201,23 +203,28 @@ class TrainLoop:
                         if 'obj_class' in self.model.layout_encoder.used_condition_types:
                             cond['obj_class'] = torch.ones_like(cond['obj_class']).fill_(self.model.layout_encoder.num_classes_for_layout_object - 1)
                             cond['obj_class'][:, 0] = 0
-                        if 'obj_box' in self.model.layout_encoder.used_condition_types:
-                            cond['obj_box'] = torch.zeros_like(cond['obj_box'])
-                            cond['obj_box'][:, 0] = torch.FloatTensor([0, 0, 1, 1])
+                        if 'obj_bbox' in self.model.layout_encoder.used_condition_types:
+                            cond['obj_bbox'] = torch.zeros_like(cond['obj_bbox'])
+                            cond['obj_bbox'][:, 0] = torch.FloatTensor([0, 0, 1, 1])
                         if 'obj_mask' in self.model.layout_encoder.used_condition_types:
                             cond['obj_mask'] = torch.zeros_like(cond['obj_mask'])
                             cond['obj_mask'][:, 0] = torch.ones(cond['obj_mask'].shape[-2:])
                         cond['is_valid_obj'] = torch.zeros_like(cond['is_valid_obj'])
+                        cond['is_valid_obj'][:, 0] = 1.0
 
             self.run_step(batch, cond)
             if self.step % self.log_interval == 0:
                 logger.dumpkvs()
 
-            if self.step % self.save_interval == 0:
+            if self.step % self.save_interval == 0 and self.step > 0:
                 self.save()
                 # Run for a finite amount of time in integration tests.
                 if os.environ.get("DIFFUSION_TRAINING_TEST", "") and self.step > 0:
                     return
+                
+                # if (self.step + self.resume_step) >= 100000:
+                #     return
+
             self.step += 1
             # torch.cuda.empty_cache()
 

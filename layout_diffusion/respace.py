@@ -6,22 +6,20 @@ from .util import get_obj_from_str
 
 
 def build_diffusion(cfg, timestep_respacing=None):
-    try:
-        used_timestep_respacing = timestep_respacing if timestep_respacing else cfg.diffusion.parameters.timestep_respacing
-        return get_obj_from_str(cfg.diffusion.type)(
-            use_timesteps=space_timesteps(cfg.diffusion.parameters.diffusion_steps, used_timestep_respacing),
-            betas=get_named_beta_schedule(
-                cfg.diffusion.parameters.noise_schedule, cfg.diffusion.parameters.diffusion_steps
-            ),
-            model_mean_type=cfg.diffusion.parameters.model_mean_type,
-            model_var_type=cfg.diffusion.parameters.model_var_type,
-            loss_type=cfg.diffusion.parameters.loss,
-        )
-    except:
-        raise NotImplementedError
+    used_timestep_respacing = timestep_respacing if timestep_respacing else cfg.diffusion.parameters.timestep_respacing
+
+    return get_obj_from_str(cfg.diffusion.type)(
+        use_timesteps=space_timesteps(cfg.diffusion.parameters.diffusion_steps, used_timestep_respacing, cfg.sample.sample_method),
+        betas=get_named_beta_schedule(
+            cfg.diffusion.parameters.noise_schedule, cfg.diffusion.parameters.diffusion_steps
+        ),
+        model_mean_type=cfg.diffusion.parameters.model_mean_type,
+        model_var_type=cfg.diffusion.parameters.model_var_type,
+        loss_type=cfg.diffusion.parameters.loss,
+    )
 
 
-def space_timesteps(num_timesteps, section_counts):
+def space_timesteps(num_timesteps, section_counts, sample_method='ddpm'):
     """
     Create a list of timesteps to use from an original diffusion process,
     given the number of timesteps we want to take from equally-sized portions
@@ -43,16 +41,20 @@ def space_timesteps(num_timesteps, section_counts):
                            DDIM paper.
     :return: a set of diffusion steps from the original process to use.
     """
+    assert sample_method in ['ddim', 'ddpm']
+    if sample_method == 'ddim':
+        assert len(section_counts) == 1
+        desired_count = section_counts[0]
+        for i in range(1, num_timesteps):
+            if len(range(0, num_timesteps, i)) == desired_count:
+                return set(range(0, num_timesteps, i))
+        raise ValueError(
+            f"cannot create exactly {num_timesteps} steps with an integer stride"
+        )
+
     if isinstance(section_counts, str):
-        if section_counts.startswith("ddim"):
-            desired_count = int(section_counts[len("ddim"):])
-            for i in range(1, num_timesteps):
-                if len(range(0, num_timesteps, i)) == desired_count:
-                    return set(range(0, num_timesteps, i))
-            raise ValueError(
-                f"cannot create exactly {num_timesteps} steps with an integer stride"
-            )
         section_counts = [int(x) for x in section_counts.split(",")]
+
     size_per = num_timesteps // len(section_counts)
     extra = num_timesteps % len(section_counts)
     start_idx = 0
