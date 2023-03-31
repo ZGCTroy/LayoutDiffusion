@@ -1,12 +1,16 @@
 # Introduction
-This repository is the official implementation of [CVPR2023: LayoutDiffusion: Controllable Diffusion Model for Layout-to-image Generation](https://arxiv.org/abs/2303.17189)
+This repository is the official implementation of CVPR2023: [LayoutDiffusion: Controllable Diffusion Model for Layout-to-image Generation](https://arxiv.org/abs/2303.17189)
 
 The code is heavily based on [openai/guided-diffusion](https://github.com/openai/guided-diffusion), 
 with the following modifications: 
 1. Added support for Distributed Training of PyTorch. 
 2. Added support for layout-to-image generation by introducing a layout encoder (layout fusion module or LFM) and object-aware cross-attention (OaCA). 
 
-# News and ToDo List 
+
+![figure](./figures/pipeline.png)
+
+# News and ToDo List
+
 - [ ] Improve README and code usage instructions
 - [ ] Clean up code 
 - [ ] Release pre-trained model
@@ -15,6 +19,7 @@ with the following modifications:
 - [x] 2023-02-27: Accepted by CVPR2023 
 - [x] 2022-11-11: Submitted to CVPR2023 
 - [x] 2022-07-08: Publish initial code
+
 
 # Setup Environment
 !!!  Coming soon  !!!
@@ -37,7 +42,7 @@ with the following modifications:
 - For custom layout sampling: 
   - Edit the 'custom_layout' dictionary at the beginning of the 'scripts/classifier-free_sample_for_single_custom_layout.py' file. 
   - Then use the command in 'quick_sample_for_single_custom_layout.bash' to generate the layout. 
- 
+
 - For full sampling: 
   - Refer to 'bash/sample.bash'. 
   - Currently, the recommended settings are steps=25 and sample_method='dpm_solver'. 
