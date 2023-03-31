@@ -1,5 +1,5 @@
 # Introduction
-This repository is the official implementation of CVPR2023: LayoutDiffusion: Controllable Diffusion Model for Layout-to-image Generation
+This repository is the official implementation of [CVPR2023: LayoutDiffusion: Controllable Diffusion Model for Layout-to-image Generation](https://arxiv.org/abs/2303.17189)
 
 The code is heavily based on [openai/guided-diffusion](https://github.com/openai/guided-diffusion), 
 with the following modifications: 
@@ -58,12 +58,12 @@ with the following modifications:
 
 # Cite
 ```
-@inproceedings{zheng2022entropy,
-  title={Entropy-Driven Sampling and Training Scheme for Conditional Diffusion Generation},
-  author={Zheng, Guangcong and Li, Shengming and Wang, Hui and Yao, Taiping and Chen, Yang and Ding, Shouhong and Li, Xi},
-  booktitle={European Conference on Computer Vision},
-  pages={754--769},
-  year={2022},
-  organization={Springer}
+@misc{zheng2023layoutdiffusion,
+    title={LayoutDiffusion: Controllable Diffusion Model for Layout-to-image Generation}, 
+    author={Guangcong Zheng and Xianpan Zhou and Xuewei Li and Zhongang Qi and Ying Shan and Xi Li},
+    year={2023},
+    eprint={2303.17189},
+    archivePrefix={arXiv},
+    primaryClass={cs.CV}
 }
 ```
