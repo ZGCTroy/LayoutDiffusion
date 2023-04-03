@@ -1,24 +1,30 @@
-# Introduction
-This repository is the official implementation of CVPR2023: [LayoutDiffusion: Controllable Diffusion Model for Layout-to-image Generation](https://arxiv.org/abs/2303.17189)
-
-The code is heavily based on [openai/guided-diffusion](https://github.com/openai/guided-diffusion), 
-with the following modifications: 
-1. Added support for Distributed Training of PyTorch. 
-2. Added support for layout-to-image generation by introducing a layout encoder (layout fusion module or LFM) and object-aware cross-attention (OaCA). 
-
-
-![figure](./figures/pipeline.png)
-
 # News and ToDo List
 
 - [ ] Improve README and code usage instructions
 - [ ] Clean up code 
 - [ ] Release pre-trained model
 - [ ] Release tools for evaluation
-- [x] 2023-03-10: Publish complete code 
+- [x] 2023-03-30: Publish complete code 
 - [x] 2023-02-27: Accepted by CVPR2023 
 - [x] 2022-11-11: Submitted to CVPR2023 
 - [x] 2022-07-08: Publish initial code
+
+
+# Introduction
+This repository is the official implementation of CVPR2023: [LayoutDiffusion: Controllable Diffusion Model for Layout-to-image Generation](https://arxiv.org/abs/2303.17189)
+
+The code is heavily based on [openai/guided-diffusion](https://github.com/openai/guided-diffusion), 
+with the following modifications:
+1. Added support for Distributed Training of PyTorch.
+2. Added support for OmegaConfig in ./configs for easy control
+3. Added support for layout-to-image generation by introducing a layout encoder (layout fusion module or LFM) and object-aware cross-attention (OaCA).
+
+
+* pipeline
+![pipeline](./figures/pipeline.png)
+
+* comparision with other methods on COCO
+![compare_with_other_methods_on_COCO](./figures/comapre_with_other_methods_on_COCO.png)
 
 
 # Setup Environment
@@ -48,18 +54,7 @@ with the following modifications:
   - Currently, the recommended settings are steps=25 and sample_method='dpm_solver'. 
   - When enabling full sampling, set 'cfg.sample.save_cropped_imgs' to True and 'cfg.sample.fix_seed' to False. 
 
-
-## 2. Experiments
-
-* COCO-stuff 256x256
-
-|                       | FID     | IS            |
-|-----------------------|---------|---------------|
-| Grid2Im (2019ICCV)    | 65.95   | 15.2 +- 0.1   |
-| LostGAN-V2 (2021TPAMI)| 42.65   | 18.2 +- 0.2   |
-| LDM (2022CVPR)        | 40.91   |    /          |
-| CAL2I+PLG (2022CVPR)  | 29.1    | 18.9 +- 0.3   |
-| Ours (LayoutDiffusion)| 18.33   | 24.09 +- 0.83 |
+  
 
 # Cite
 ```

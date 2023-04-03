@@ -175,12 +175,10 @@ def main():
         model_kwargs = {
             'obj_class': cond['obj_class'].to(dist_util.dev()),
             'obj_bbox': cond['obj_bbox'].to(dist_util.dev()),
-            'reconstruct_object_image': cfg.model.parameters.reconstruct_object_image,
             'is_valid_obj': cond['is_valid_obj'].to(dist_util.dev())
         }
         if 'obj_mask' in cfg.data.parameters.used_condition_types:
             model_kwargs['obj_mask']: cond['obj_mask'].to(dist_util.dev())
-
 
         for sample_idx in range(cfg.sample.sample_times):
             start_time = time.time()
@@ -371,7 +369,6 @@ def main():
                     #     utils.save_image(obj_mask, os.path.join(log_dir, "gt_obj_mask/{}.png".format(filename)), nrow=cfg.data.parameters.layout_length)
 
             torch.cuda.empty_cache()
-
 
         dist.barrier()
         cur_num_samples = (batch_idx + 1) * cfg.data.parameters.test.batch_size * dist.get_world_size()

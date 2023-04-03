@@ -23,7 +23,7 @@ import numpy as np
 import h5py
 import PIL
 
-from layout_diffusion.dataset.util import image_normalize, get_contrastive_layout_and_image_labels
+from layout_diffusion.dataset.util import image_normalize
 from layout_diffusion.dataset.augmentations import RandomSampleCrop, RandomMirror
 from torch.utils.data import Dataset
 import json
@@ -35,7 +35,6 @@ class VgSceneGraphDataset(Dataset):
                  max_objects_per_image=10, max_num_samples=None, mask_size=32,
                  use_orphaned_objects=True,
                  left_right_flip=False, min_object_size=32, use_MinIoURandomCrop=False,
-                 return_obj_region=False, resolutions_to_return_obj_region=[],
                  return_origin_image=False, specific_image_ids=[]
                  ):
         super(VgSceneGraphDataset, self).__init__()
@@ -46,8 +45,6 @@ class VgSceneGraphDataset(Dataset):
                 T.ToTensor(),
                 image_normalize()
             ])
-        self.return_obj_region = return_obj_region
-        self.resolutions_to_return_obj_region = resolutions_to_return_obj_region
 
         self.image_dir = image_dir
         self.mask_size = mask_size
@@ -274,14 +271,6 @@ class VgSceneGraphDataset(Dataset):
 
         meta_data['obj_class_name'] = [self.vocab['object_idx_to_name'][int(class_id)] for class_id in meta_data['obj_class']]
         meta_data['num_obj'] = meta_data['num_selected'] + meta_data['num_add'] - 1
-        if self.return_obj_region:
-            assert self.resolutions_to_return_obj_region
-            for resolution in self.resolutions_to_return_obj_region:
-                meta_data['labels_from_layout_to_image_at_resolution{}'.format(resolution)] = get_contrastive_layout_and_image_labels(
-                    obj_bbox=meta_data['obj_bbox'],
-                    width=self.image_size[1], height=self.image_size[0],
-                    resolution=resolution
-                )  # L2 x L1
 
         if self.return_origin_image:
             meta_data['origin_image'] = self.origin_transform(origin_image)
@@ -339,8 +328,6 @@ def build_vg_dsets(cfg, mode='train'):
         left_right_flip=params[mode].left_right_flip,
         use_orphaned_objects=params.use_orphaned_objects,
         use_MinIoURandomCrop=params[mode].use_MinIoURandomCrop,
-        return_obj_region=params[mode].return_obj_region,
-        resolutions_to_return_obj_region=params[mode].resolutions_to_return_obj_region,
         return_origin_image=params.return_origin_image,
         specific_image_ids=params[mode].specific_image_ids
     )

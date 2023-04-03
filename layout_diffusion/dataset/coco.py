@@ -24,7 +24,7 @@ import torch
 import torchvision.transforms as T
 from torch.utils.data import Dataset
 
-from layout_diffusion.dataset.util import image_normalize, get_contrastive_layout_and_image_labels
+from layout_diffusion.dataset.util import image_normalize
 from layout_diffusion.dataset.augmentations import RandomSampleCrop, RandomMirror
 
 
@@ -37,7 +37,6 @@ class CocoSceneGraphDataset(Dataset):
                  include_other=False, instance_whitelist=None, stuff_whitelist=None, mode='train',
                  use_deprecated_stuff2017=False, deprecated_coco_stuff_ids_txt='', filter_mode='LostGAN',
                  use_MinIoURandomCrop=False,
-                 return_obj_region=False, resolutions_to_return_obj_region=[],
                  return_origin_image=False, specific_image_ids=None
                  ):
         """
@@ -79,8 +78,6 @@ class CocoSceneGraphDataset(Dataset):
                 T.ToTensor(),
                 image_normalize()
             ])
-        self.return_obj_region = return_obj_region
-        self.resolutions_to_return_obj_region = resolutions_to_return_obj_region
 
         if stuff_only and stuff_json is None:
             print('WARNING: Got stuff_only=True but stuff_json=None.')
@@ -432,15 +429,6 @@ class CocoSceneGraphDataset(Dataset):
         meta_data['num_selected'] = num_selected
         meta_data['obj_class_name'] = [self.vocab['object_idx_to_name'][int(class_id)] for class_id in meta_data['obj_class']]
 
-        if self.return_obj_region:
-            assert self.resolutions_to_return_obj_region
-            for resolution in self.resolutions_to_return_obj_region:
-                meta_data['labels_from_layout_to_image_at_resolution{}'.format(resolution)] = get_contrastive_layout_and_image_labels(
-                    obj_bbox=meta_data['obj_bbox'],
-                    width=self.image_size[1], height=self.image_size[0],
-                    resolution=resolution
-                )  # L2 x L1
-
         if self.return_origin_image:
             meta_data['origin_image'] = self.origin_transform(origin_image)
 
@@ -498,8 +486,6 @@ def build_coco_dsets(cfg, mode='train'):
         max_num_samples=params[mode].max_num_samples,
         left_right_flip=params[mode].left_right_flip,
         use_MinIoURandomCrop=params[mode].use_MinIoURandomCrop,
-        return_obj_region=params[mode].return_obj_region,
-        resolutions_to_return_obj_region=params[mode].resolutions_to_return_obj_region,
         return_origin_image=params.return_origin_image,
         specific_image_ids=params[mode].specific_image_ids
     )

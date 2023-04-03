@@ -298,10 +298,7 @@ class AttentionBlock(nn.Module):
             num_head_channels=-1,
             use_checkpoint=False,
             encoder_channels=None,
-            reconstruct_object_image=False,
-            reconstruct_size=1,
             return_attention_embeddings=False,
-            return_embeddings_for_layout_image_contrastive_loss=False,
             ds=None,
             resolution=None,
             type=None,
@@ -312,7 +309,6 @@ class AttentionBlock(nn.Module):
         self.ds = ds
         self.resolution = resolution
         self.return_attention_embeddings = return_attention_embeddings
-        self.return_embeddings_for_layout_image_contrastive_loss = return_embeddings_for_layout_image_contrastive_loss
 
         self.channels = channels
         if num_head_channels == -1:
@@ -333,38 +329,12 @@ class AttentionBlock(nn.Module):
         self.norm = normalization(channels)
 
         self.qkv = conv_nd(1, channels, channels * 3, 1)
-        self.reconstruct_object_image = reconstruct_object_image
-        self.reconstruct_size = reconstruct_size
 
         self.attention = QKVAttentionLegacy(self.num_heads)
 
         self.encoder_channels = encoder_channels
         if encoder_channels is not None:
             self.encoder_kv = conv_nd(1, encoder_channels, channels * 2, 1)
-
-            if self.reconstruct_object_image:
-                self.norm2 = normalization(channels)
-                self.kv_for_image = conv_nd(1, channels, channels * 2, 1)
-                self.q_for_object = conv_nd(1, encoder_channels, channels, 1)
-                self.attention_to_reconstruct_object_image = QKVCrossAttentionLegacyForLayoutAndImage(self.num_heads)
-                self.proj_out_for_obj = nn.Sequential(
-                    # normalization(channels),
-                    SiLU(),
-                    zero_module(conv_nd(1, channels, reconstruct_size * reconstruct_size * 3, 1))
-                )
-
-            if self.return_embeddings_for_layout_image_contrastive_loss:
-                self.layout_embedding_projector = nn.Sequential(
-                    conv_nd(1, encoder_channels, 128, 1),
-                    nn.ReLU(),
-                    conv_nd(1, 128, 128, 1)
-                )
-                self.image_embedding_projector = nn.Sequential(
-                    conv_nd(1, channels, 128, 1),
-                    nn.ReLU(),
-                    conv_nd(1, 128, 128, 1)
-                )
-                self.temperature = nn.Parameter(torch.FloatTensor([1.0]))
 
         self.proj_out = zero_module(conv_nd(1, channels, channels, 1))
 
@@ -405,43 +375,7 @@ class AttentionBlock(nn.Module):
                     'layout_key_embeddings': kv_for_encoder_out[:, : self.channels, :].detach()  # N x C x L2
                 })
 
-        if self.return_embeddings_for_layout_image_contrastive_loss:
-            assert cond_kwargs is not None
-            if extra_output is None:
-                extra_output = {}
-            extra_output.update({
-                'type': self.type,
-                'ds': self.ds,
-                'resolution': self.resolution,
-                'num_heads': self.num_heads,
-                'num_channels': self.channels,
-                'temperature': self.temperature,
-                'image_embeddings': self.image_embedding_projector(x),  # N x C x (HxW) --> N x 128 x (HxW)
-                'layout_embeddings': self.layout_embedding_projector(cond_kwargs['xf_out'])  # N x C x L2 --> N x 128 x L2
-            })
-
-        if self.reconstruct_object_image:
-            assert cond_kwargs is not None
-            object_q = self.q_for_object(cond_kwargs['xf_out'])  # xf_out: (N x encoder_channels x L2) -> (N x C x L2), 其中L2=max_obj_num
-            bs, width, length = object_q.shape
-            assert width % self.num_heads == 0
-            ch = width // self.num_heads
-            object_q = object_q.reshape(bs * self.num_heads, ch, length)  # (bs*n_head, C//n_head, L2)
-
-            bs, width, h, w = output.shape
-            image_kv = self.norm2(output.reshape(bs, width, -1))  # (N, C, L1)
-            image_kv = self.kv_for_image(image_kv)  # (N, C, L1) -> (N, 2C, L1)
-            assert width % self.num_heads == 0
-            ch = width // self.num_heads
-            image_k, image_v = image_kv.reshape(bs * self.num_heads, ch * 2, h * w).split(ch, dim=1)  # (bs*n_head, C//n_head, L1)
-
-            extra_output = self.attention_to_reconstruct_object_image(q=object_q, k=image_k, v=image_v)  # extra_output: N x C x L2, 其中L2=max_obj_num
-            extra_output = self.proj_out_for_obj(extra_output)  # N x C x L2 -> N x (3*ds*ds) x L2
-            extra_output = extra_output.permute(0, 2, 1)  # N x (ds*ds*3) x L2 -> N x L2 x (3*ds*ds)
-            extra_output = extra_output.reshape(extra_output.shape[0], extra_output.shape[1], 3, self.reconstruct_size, self.reconstruct_size)
-
         return output, extra_output
-
 
 
 class ObjectAwareCrossAttention(nn.Module):
@@ -459,10 +393,7 @@ class ObjectAwareCrossAttention(nn.Module):
             num_head_channels=-1,
             use_checkpoint=False,
             encoder_channels=None,
-            reconstruct_object_image=False,
-            reconstruct_size=1,
             return_attention_embeddings=False,
-            return_embeddings_for_layout_image_contrastive_loss=False,
             ds=None,
             resolution=None,
             type=None,
@@ -474,7 +405,6 @@ class ObjectAwareCrossAttention(nn.Module):
         self.ds = ds
         self.resolution = resolution
         self.return_attention_embeddings = return_attention_embeddings
-        self.return_embeddings_for_layout_image_contrastive_loss = return_embeddings_for_layout_image_contrastive_loss
 
         self.channels = channels
         if num_head_channels == -1:
@@ -499,9 +429,6 @@ class ObjectAwareCrossAttention(nn.Module):
             self.norm_for_obj_class_embedding = normalization(encoder_channels)
             self.norm_for_layout_positional_embedding = normalization(channels)
             self.norm_for_image_patch_positional_embedding = normalization(channels)
-
-            if self.return_embeddings_for_layout_image_contrastive_loss:
-                self.temperature = nn.Parameter(torch.FloatTensor([1.0]))
 
         self.proj_out = zero_module(conv_nd(1, channels, channels, 1))
 
@@ -589,13 +516,12 @@ class ObjectAwareCrossAttention(nn.Module):
         attn_output_weights = attn_output_weights.view(bs, self.num_heads, L1, L1 + L2)
 
         attn_output_weights = attn_output_weights.masked_fill(
-            key_padding_mask.unsqueeze(1).unsqueeze(2), # (N, 1, 1, L1+L2)
+            key_padding_mask.unsqueeze(1).unsqueeze(2),  # (N, 1, 1, L1+L2)
             float('-inf'),
         )
         attn_output_weights = attn_output_weights.view(bs * self.num_heads, L1, L1 + L2)
 
-
-        attn_output_weights = th.softmax(attn_output_weights.float(), dim=-1).type(attn_output_weights.dtype) # (N x num_heads, L1, L1+L2)
+        attn_output_weights = th.softmax(attn_output_weights.float(), dim=-1).type(attn_output_weights.dtype)  # (N x num_heads, L1, L1+L2)
 
         attn_output = th.einsum("bts,bcs->bct", attn_output_weights, v_mix)  # (N x num_heads, C // num_heads, L1)
         attn_output = attn_output.reshape(bs, C, L1)  # (N, C, L1)
@@ -625,21 +551,6 @@ class ObjectAwareCrossAttention(nn.Module):
                     # 'layout_key_embeddings': kv_for_encoder_out[:, : self.channels, :].detach()  # N x C x L2
                 })
 
-        if self.return_embeddings_for_layout_image_contrastive_loss:
-            assert cond_kwargs is not None
-            if extra_output is None:
-                extra_output = {}
-            extra_output.update({
-                'type': self.type,
-                'ds': self.ds,
-                'resolution': self.resolution,
-                'num_heads': self.num_heads,
-                'num_channels': self.channels,
-                'temperature': self.temperature,
-                'image_embeddings': image_patch_positional_embedding.reshape(bs, self.num_heads * ch, L1),  # N x C x (HxW) --> N x 128 x (HxW)
-                'layout_embeddings': layout_positional_embedding.reshape(bs, self.num_heads * ch, L2)  # N x C x L2 --> N x 128 x L2
-            })
-
         return output, extra_output
 
 
@@ -661,7 +572,6 @@ def count_flops_attn(model, _x, y):
     # the combination of the value vectors.
     matmul_ops = 2 * b * (num_spatial ** 2) * c
     model.total_ops += th.DoubleTensor([matmul_ops])
-
 
 
 class QKVAttentionLegacy(nn.Module):
@@ -743,9 +653,6 @@ class LayoutDiffusionUNetModel(nn.Module):
         xf_final_ln: use a LayerNorm after the output layer.
         num_classes_for_layout_object: num of classes for layout object.
         mask_size_for_layout_object: mask size for layout object image.
-        reconstruct_object_image: whether to reconstruct object image.
-        reconstruct_size: size of reconstructed image .
-        attention_ds_to_reconstruct_object_image: attention ds to reconstruct object image.
     }
 
     """
@@ -759,9 +666,6 @@ class LayoutDiffusionUNetModel(nn.Module):
             num_res_blocks,
             attention_ds,
             encoder_channels=None,
-            reconstruct_object_image=False,
-            reconstruct_size=32,
-            attention_ds_to_reconstruct_object_image=[32, 16, 8],
             dropout=0,
             channel_mult=(1, 2, 4, 8),
             conv_resample=True,
@@ -773,8 +677,6 @@ class LayoutDiffusionUNetModel(nn.Module):
             num_heads_upsample=-1,
             use_scale_shift_norm=False,
             resblock_updown=False,
-            ds_to_return_attention_embeddings=[],
-            ds_to_return_layout_image_embeddings_for_contrastive_loss=[],
             use_positional_embedding_for_attention=False,
             image_size=256,
             attention_block_type='GLIDE',
@@ -790,13 +692,8 @@ class LayoutDiffusionUNetModel(nn.Module):
 
         self.image_size = image_size
         self.use_positional_embedding_for_attention = use_positional_embedding_for_attention
-        self.ds_to_return_attention_embeddings = ds_to_return_attention_embeddings
-        self.ds_to_return_layout_image_embeddings_for_contrastive_loss = ds_to_return_layout_image_embeddings_for_contrastive_loss
 
         self.layout_encoder = layout_encoder
-        self.reconstruct_object_image = reconstruct_object_image
-        self.reconstruct_size = reconstruct_size
-        self.attention_ds_to_reconstruct_object_image = attention_ds_to_reconstruct_object_image
 
         if num_heads_upsample == -1:
             num_heads_upsample = num_heads
@@ -853,8 +750,6 @@ class LayoutDiffusionUNetModel(nn.Module):
                                 num_heads=num_heads,
                                 num_head_channels=num_head_channels,
                                 encoder_channels=encoder_channels,
-                                return_attention_embeddings=True if ds in self.ds_to_return_attention_embeddings else False,
-                                return_embeddings_for_layout_image_contrastive_loss=True if ds in self.ds_to_return_layout_image_embeddings_for_contrastive_loss else False,
                                 ds=ds,
                                 resolution=int(self.image_size // ds),
                                 type='input',
@@ -904,8 +799,6 @@ class LayoutDiffusionUNetModel(nn.Module):
                 num_heads=num_heads,
                 num_head_channels=num_head_channels,
                 encoder_channels=encoder_channels,
-                return_attention_embeddings=True if ds in self.ds_to_return_attention_embeddings else False,
-                return_embeddings_for_layout_image_contrastive_loss=False,
                 ds=ds,
                 resolution=int(self.image_size // ds),
                 type='middle',
@@ -939,10 +832,7 @@ class LayoutDiffusionUNetModel(nn.Module):
                 ]
                 ch = int(model_channels * mult)
                 if ds in attention_ds:
-                    if i == num_res_blocks and ds in attention_ds_to_reconstruct_object_image and self.reconstruct_object_image:
-                        reconstruct_object_image_flag = True
-                    else:
-                        reconstruct_object_image_flag = False
+
                     for _ in range(self.num_attention_blocks):
                         layers.append(
                             attention_block_fn(
@@ -951,10 +841,6 @@ class LayoutDiffusionUNetModel(nn.Module):
                                 num_heads=num_heads_upsample,
                                 num_head_channels=num_head_channels,
                                 encoder_channels=encoder_channels,
-                                reconstruct_object_image=reconstruct_object_image_flag,
-                                reconstruct_size=reconstruct_size,
-                                return_attention_embeddings=True if ds in self.ds_to_return_attention_embeddings else False,
-                                return_embeddings_for_layout_image_contrastive_loss=False,
                                 ds=ds,
                                 resolution=int(self.image_size // ds),
                                 type='output',

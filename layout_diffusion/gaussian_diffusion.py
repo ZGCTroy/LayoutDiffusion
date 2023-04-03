@@ -13,7 +13,7 @@ import torch.nn
 import torch.nn.functional as F
 
 from .losses import normal_kl, discretized_gaussian_log_likelihood
-from layout_diffusion.dataset.util import get_cropped_image, get_contrastive_layout_and_image_batch_labels
+from layout_diffusion.dataset.util import get_cropped_image
 from .nn import mean_flat
 from . import dist_util
 
@@ -277,32 +277,6 @@ class GaussianDiffusion:
                 x_start=pred_xstart, x_t=x, t=t
             )
 
-            if 'reconstruct_object_image' in list(model_kwargs.keys()) and model_kwargs['reconstruct_object_image']:
-                assert self.model_mean_type in ['EPSILON']
-                extra_means, extra_log_variances = [], []
-                for extra_output in extra_outputs:
-                    cropped_xt = get_cropped_image(
-                        obj_bboxes=model_kwargs['obj_bbox'],
-                        images=x,
-                        image_size=x.shape[2],  # N, 3, H, W
-                        cropped_size=extra_output.shape[3],  # N, L, 3, ds, ds
-                    )  # N, L, 3, ds, ds
-                    bs, length, _, ds, _ = cropped_xt.shape
-                    cropped_xt = cropped_xt.reshape(-1, *cropped_xt.shape[-3:])  # (N*L, 3, ds, ds)
-                    cropped_eps = extra_output.reshape(-1, *extra_output.shape[-3:])  # (N*L, 3, ds, ds)
-                    cropped_t = torch.repeat_interleave(input=t, repeats=length, dim=0)
-                    pred_cropped_xstart = process_xstart(
-                        self._predict_xstart_from_eps(x_t=cropped_xt, t=cropped_t, eps=cropped_eps)
-                    )  # (N*L, 3, ds, ds)
-                    cropped_model_mean, _, _ = self.q_posterior_mean_variance(
-                        x_start=pred_cropped_xstart, x_t=cropped_xt, t=cropped_t
-                    )  # (N*L, 3, ds, ds)
-                    extra_means.append(cropped_model_mean)
-
-                results.update({
-                    'extra_means': extra_means,
-                    'extra_log_variances': extra_log_variances
-                })
         else:
             raise NotImplementedError(self.model_mean_type)
 
@@ -444,15 +418,6 @@ class GaussianDiffusion:
         if 'return_attention_embeddings' in list(model_kwargs.keys()) and model_kwargs['return_attention_embeddings']:
             results.update({
                 'extra_outputs': out['extra_outputs']
-            })
-
-        if model_kwargs['reconstruct_object_image']:
-
-            extra_samples = []
-            for extra_mean in out['extra_means']:
-                extra_samples.append(extra_mean)  # (N*L, 3, ds, ds)
-            results.update({
-                'extra_samples': extra_samples  # (num_ds, N*L, 3, ds, ds)
             })
 
         results.update({
@@ -835,118 +800,6 @@ class GaussianDiffusion:
 
 
             terms["loss"] = terms["loss"] + terms["mse"] + terms["vb"]
-
-        # 2. LAYOUT_IMAGE_MATCHING_LOSS
-        # if "LAYOUT_IMAGE_MATCHING_LOSS" in self.loss_type:
-        #     terms["ct_loss"] = 0
-        #     num_ct_loss = 0
-        #     for extra_output in extra_outputs:
-        #
-        #         # labels_from_layout_to_image = get_contrastive_layout_and_image_batch_labels(
-        #         #     obj_bbox=model_kwargs['obj_bbox'],
-        #         #     height=H,
-        #         #     width=W,
-        #         #     resolution=extra_output['resolution']
-        #         # ) # N x L2 x L1
-        #
-        #
-        #         resolution = extra_output['resolution']
-        #         image_embeddings = extra_output['image_embeddings']  # N x C x L1 = N x C x (H x W)
-        #         layout_embeddings = extra_output['layout_embeddings']  # N x C x L2
-        #
-        #         image_embeddings = torch.nn.functional.normalize(image_embeddings.permute(0, 2, 1), dim=-1, p=2) # normalized N x L1 x C
-        #         layout_embeddings = torch.nn.functional.normalize(layout_embeddings.permute(0, 2, 1), dim=-1, p=2) # normalized N x L2 x C
-        #
-        #         logits = th.einsum("btc,bsc->bts", layout_embeddings, image_embeddings) # N x L2 x L1
-        #
-        #         N, L2, L1 = logits.shape
-        #         is_valid_obj = model_kwargs['is_valid_obj'] # N x L2
-        #         labels_from_layout_to_image = model_kwargs['labels_from_layout_to_image_at_resolution{}'.format(resolution)]
-        #
-        #         layout_image_contrastive_loss = torch.nn.KLDivLoss(reduction='none')(
-        #             input = F.log_softmax(logits/extra_output['temperature'], dim=2),
-        #             target = labels_from_layout_to_image.to(dist_util.dev())
-        #         )
-        #
-        #         layout_image_contrastive_loss = is_valid_obj.view(N, L2, 1) * layout_image_contrastive_loss # N x L2 x L1
-        #
-        #         loss_name= "ct_loss_{}_ds{}".format(extra_output['type'], extra_output['ds'])
-        #         terms[loss_name] = layout_image_contrastive_loss.mean(dim=2).sum(dim=1)
-        #         terms["ct_loss"] = terms["ct_loss"] + terms[loss_name]
-        #         num_ct_loss += 1
-        #
-        #     assert num_ct_loss>0
-        #     terms["ct_loss"] = 0.1 * terms["ct_loss"] / num_ct_loss
-        #     terms["loss"] = terms["loss"] + terms["ct_loss"]
-
-        if "LAYOUT_IMAGE_MATCHING_LOSS" in self.loss_type:
-            terms["ct_loss"] = 0
-            num_ct_loss = 0
-            softmax_layer = torch.nn.Softmax(dim=2)
-            nll_loss_criterion = torch.nn.NLLLoss(reduction='none')
-            for extra_output in extra_outputs:
-
-                resolution = extra_output['resolution']
-                image_embeddings = extra_output['image_embeddings']  # N x C x L1 = N x C x (H x W)
-                layout_embeddings = extra_output['layout_embeddings']  # N x C x L2
-
-                image_embeddings = torch.nn.functional.normalize(image_embeddings.permute(0, 2, 1), dim=-1, p=2) # normalized N x L1 x C
-                layout_embeddings = torch.nn.functional.normalize(layout_embeddings.permute(0, 2, 1), dim=-1, p=2) # normalized N x L2 x C
-
-                logits = th.einsum("btc,bsc->bts", layout_embeddings, image_embeddings) # N x L2 x L1
-
-
-                N, L2, L1 = logits.shape
-                is_valid_obj = model_kwargs['is_valid_obj'] # N x L2
-                labels_from_layout_to_image = model_kwargs['labels_from_layout_to_image_at_resolution{}'.format(resolution)] # N x L2 x L1
-
-                probability = softmax_layer(logits / extra_output['temperature'] ) # N x L2 x L1
-                probability_positive = torch.sum(labels_from_layout_to_image * probability, dim=2, keepdim=True) # N x L2 x 1
-                probability_negative = torch.sum((1.0 - labels_from_layout_to_image) * probability, dim=2, keepdim=True) # N x L2 x 1
-                probability = torch.cat([probability_positive, probability_negative], dim=2) # N x L2 x 2
-
-                log_probability = torch.log(probability + 1e-3)  # N x L2 x 2
-
-                layout_image_contrastive_loss = nll_loss_criterion(
-                    input = log_probability.permute(0, 2, 1), # N x 2 x L2
-                    target = torch.zeros([N, L2], device=dist_util.dev()).long()
-                ) # N x L2
-
-                layout_image_contrastive_loss = is_valid_obj.view(N, L2) * layout_image_contrastive_loss # N x L2
-
-                loss_name= "ct_loss_{}_ds{}".format(extra_output['type'], extra_output['ds'])
-                terms[loss_name] = layout_image_contrastive_loss.sum(dim=1) # N
-                terms["ct_loss"] = terms["ct_loss"] + terms[loss_name]
-                num_ct_loss += 1
-
-            assert num_ct_loss>0
-            terms["ct_loss"] = 0.001 * terms["ct_loss"] / num_ct_loss
-            terms["loss"] = terms["loss"] + terms["ct_loss"]
-
-        # if self.loss_type == 'RESCALED_MSE_RECONSTRUCT_OBJECT_IMAGE':
-        #
-        #     image_size = noise.shape[2]
-        #     terms["reconstruct_object_image"] = 0.0
-        #
-        #     for extra_output in extra_outputs:
-        #         bs, length, _, reconstruct_size = extra_output.shape[:4]  # (N, L, 3, reconstruct_size, reconstruct_size)
-        #
-        #         cropped_noise_for_obj_image = get_cropped_image(
-        #             obj_bboxes=model_kwargs['obj_bbox'],
-        #             images=noise,
-        #             image_size=image_size,
-        #             cropped_size=reconstruct_size
-        #         )  # (N, L, 3, reconstruct_size, reconstruct_size)
-        #
-        #         # cropped_extra_output = extra_output.reshape(bs * length, 3, cropped_size, cropped_size)
-        #         # valid_cropped_extra_output = extra_output[model_kwargs['is_valid_obj'].reshape(-1)]  # (num_valid_objs, 3, M, M)
-        #         reconstruct_object_image_loss = (cropped_noise_for_obj_image - extra_output) ** 2  # (N, L, 3, reconstruct_size, reconstruct_size)
-        #         reconstruct_object_image_loss = reconstruct_object_image_loss.mean(dim=list(range(2, len(reconstruct_object_image_loss.shape))))  # (N, L, 3, ds, ds) -> (N,L)
-        #         terms["reconstruct_object_image"] = terms["reconstruct_object_image"] + mean_flat(
-        #             model_kwargs['is_valid_obj'] * reconstruct_object_image_loss
-        #         ) * self.loss_type['reconstruct_object_image_loss_weight']
-        #
-        #     terms["loss"] = terms["loss"] + terms["reconstruct_object_image"]
 
         return terms
 

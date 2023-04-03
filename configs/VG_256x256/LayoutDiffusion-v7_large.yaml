@@ -1,18 +1,7 @@
-#Changes from version 3 to version 4:
-#  1. disable layout-image contrastive learning on input attention blocks
-#  2. add layout positional embedding for attention of Unet
-#  3. use conditional detr
-
-
 model:
   type: layout_diffusion.layout_diffusion_unet.LayoutDiffusionUNetModel
   parameters:
     image_size: 256
-
-    reconstruct_object_image: False
-    attention_ds_to_reconstruct_object_image: []
-    reconstruct_size: 32
-
     use_fp16: True
     use_scale_shift_norm: True
     in_channels: 3
@@ -29,11 +18,7 @@ model:
     channel_mult: [ 1, 1, 2, 2, 4, 4 ]
     dropout: 0.0
     use_checkpoint: False
-
-    ds_to_return_attention_embeddings: []
-    ds_to_return_layout_image_embeddings_for_contrastive_loss: []
     use_positional_embedding_for_attention: True
-
     attention_block_type: 'ObjectAwareCrossAttention'
 
 
@@ -49,7 +34,7 @@ model:
         num_heads: 8
         use_final_ln: True
         use_positional_embedding: False
-        resolution_to_attention: [32, 16, 8]
+        resolution_to_attention: [ 32, 16, 8 ]
         use_key_padding_mask: False
 
 
@@ -63,7 +48,7 @@ diffusion:
     noise_schedule: "linear"
     learn_sigma: True
     timestep_respacing: [ 1000 ]
-    loss: ["RESCALED_MSE"]
+    loss: [ "RESCALED_MSE" ]
 
 schedule_sampler:
   type: layout_diffusion.resample.UniformSampler
@@ -82,43 +67,37 @@ data:
     image_dir: 'images'
     max_objects_per_image: 10
     use_orphaned_objects: True
-    used_condition_types: [ 'obj_class','obj_bbox']
+    used_condition_types: [ 'obj_class','obj_bbox' ]
     return_origin_image: False
-
-
 
     train:
       h5_path: 'train.h5'
       max_num_samples: null
-      specific_image_ids: []
+      specific_image_ids: [ ]
       shuffle: True
       batch_size: 4 # 4x8=32
       left_right_flip: True
       use_MinIoURandomCrop: True
-      return_obj_region: False
-      resolutions_to_return_obj_region: [ ]
 
     val:
       h5_path: 'val.h5'
       max_num_samples: null
-      specific_image_ids: []
+      specific_image_ids: [ ]
       shuffle: False
       batch_size: 8
       left_right_flip: False
       use_MinIoURandomCrop: False
-      return_obj_region: False
-      resolutions_to_return_obj_region: []
 
     test:
       h5_path: 'test.h5'
       max_num_samples: null
-      specific_image_ids: []
+      specific_image_ids: [ ]
       shuffle: False
       batch_size: 32
       left_right_flip: False
       use_MinIoURandomCrop: False
       return_obj_region: False
-      resolutions_to_return_obj_region: []
+      resolutions_to_return_obj_region: [ ]
 
 
 
