@@ -1,28 +1,11 @@
+WORKSPACE=/workspace/mnt/storage/guangcongzheng/zju_zgc/LayoutDiffusion
+cd ${WORKSPACE}
 
-cd /workspace/mnt/storage/guangcongzheng/zju_zgc/LayoutDiffusion
-conda activate
+conda create -n LayoutDiffusion python=3.8
+conda activate LayoutDiffusion
+conda install pytorch==1.10.1 torchvision==0.11.2 torchaudio==0.10.1 cudatoolkit=11.3 -c pytorch -c conda-forge
+pip install omegaconf opencv-python h5py==3.2.1 gradio==3.24.1
+pip install -e ./repositories/dpm_solver
 
-pip install omegaconf
-
-rm -rf /opt/conda/lib/python3.8/site-packages/layout_diffusion
-
-rm -rf ./layout_diffusion.egg-info
 
 python setup.py build develop
-
-WORLD_SIZE=1
-RANK=0
-MASTER_ADDR=localhost
-MASTER_PORT=$((RANDOM + 10000))
-
-
-# pip install  tensorflow-gpu==2.7.0 blobfile  mpi4py tqdm requests pandas
-#     conda install -y openmpi
-#
-#WORKSPACE = "/workspace/guided-diffusion/pretrain_model"
-#
-#cd $WORKSPACE
-#wget https://openaipublic.blob.core.windows.net/diffusion/jul-2021/256x256_diffusion.pt
-#wget https://openaipublic.blob.core.windows.net/diffusion/jul-2021/256x256_classifier.pt
-#wget https://openaipublic.blob.core.windows.net/diffusion/jul-2021/ref_batches/imagenet/256/VIRTUAL_imagenet256_labeled.npz
-#

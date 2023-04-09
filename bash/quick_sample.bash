@@ -27,12 +27,7 @@ SAMPLE_TIMES=1
 SAMPLE_ROOT='/workspace/mnt/storage/3150104097/zju_tiny_backup/samples'
 #SAMPLE_ROOT='/workspace/mnt/storage/guangcongzheng/zju_zgc_backup/samples'
 
-python
-import torch
-x = torch.Tensor([1.0])
-x.to('cuda:0')
-x.to('cuda:1')
-exit()
+
 
 CUDA_VISIBLE_DEVICES=1 \
 python -m torch.distributed.launch  \

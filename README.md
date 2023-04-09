@@ -2,12 +2,15 @@
 
 - [ ] Improve README and code usage instructions
 - [ ] Clean up code 
-- [ ] Release pre-trained model
 - [ ] Release tools for evaluation
+- [x] 2023-04-09: Release [pre-trained model](https://drive.google.com/drive/folders/1sJxbhi_pioFaHKgAAAuo8wZLIBuLbyxz?usp=sharing) 
+- [x] 2023-04-09: Release instructions for setuping up environment and training 
+- [x] 2023-04-09: Release Gradio Webui Demo
 - [x] 2023-03-30: Publish complete code 
 - [x] 2023-02-27: Accepted by CVPR2023 
 - [x] 2022-11-11: Submitted to CVPR2023 
 - [x] 2022-07-08: Publish initial code
+
 
 
 # Introduction
@@ -19,22 +22,50 @@ with the following modifications:
 2. Added support for OmegaConfig in ./configs for easy control
 3. Added support for layout-to-image generation by introducing a layout encoder (layout fusion module or LFM) and object-aware cross-attention (OaCA).
 
+## Gradio Webui Demo
+![pipeline](./figures/gradio_demo.png)
 
-* pipeline
+## Pipeline
 ![pipeline](./figures/pipeline.png)
 
-* comparision with other methods on COCO
+## Visualizations on COCO-stuff
 ![compare_with_other_methods_on_COCO](./figures/comapre_with_other_methods_on_COCO.png)
 
 
 # Setup Environment
-!!!  Coming soon  !!!
+```bash
+conda create -n LayoutDiffusion python=3.8
+conda activate LayoutDiffusion
+
+conda install pytorch==1.10.1 torchvision==0.11.2 torchaudio==0.10.1 cudatoolkit=11.3 -c pytorch -c conda-forge
+pip install omegaconf opencv-python h5py==3.2.1 gradio==3.24.1
+pip install -e ./repositories/dpm_solver
+
+python setup.py build develop
+```
+
+# Gradio Webui Demo
+```bash
+  python scripts/launch_gradio_app.py  \
+  --config_file configs/COCO-stuff_256x256/LayoutDiffusion-v7_large.yaml \
+  sample.pretrained_model_path=./log/COCO-stuff_256x256/LayoutDiffusion-v7_large/ema_0.9999_1150000.pt
+```
 
 # Training
-* bash/cmd1.bash
+* bash/train.bash
+```bash
+python -m torch.distributed.launch \
+       --nproc_per_node 8 \
+       scripts/image_train_for_layout.py \
+       --config_file ./configs/COCO-stuff_256x256/LayoutDiffusion_large.yaml
+```
 
-## Sampling
-* bash/quick_sample.bash
+## Evaluation (To be continued)
+
+- Sampling for the entire validation dataset: 
+  - Refer to 'bash/sample.bash'. 
+  - Currently, the recommended settings are steps=25 and sample_method='dpm_solver'. 
+  - When enabling full sampling, set 'cfg.sample.save_cropped_imgs' to True and 'cfg.sample.fix_seed' to False. 
 
 - quick sample
   - Three sampling methods are available: ddpm, ddim, and dpm_solver. 
@@ -45,14 +76,6 @@ with the following modifications:
   - For data sampling, set data.parameters.test.max_num_samples=64 to select the first 64 images in the data set, and data.parameters.test.batch_size=8. 
   - To select specific image IDs for COCO-stuff, set data.parameters.test.specific_image_ids='['VG_100K_2/103.jpg', 'VG_100K_2/113.jpg']', with specific_image_ids having a higher priority than max_num_samples. To select image IDs for VG, set data.parameters.test.specific_image_ids='[87038, 174482]'.
 
-- For custom layout sampling: 
-  - Edit the 'custom_layout' dictionary at the beginning of the 'scripts/classifier-free_sample_for_single_custom_layout.py' file. 
-  - Then use the command in 'quick_sample_for_single_custom_layout.bash' to generate the layout. 
-
-- For full sampling: 
-  - Refer to 'bash/sample.bash'. 
-  - Currently, the recommended settings are steps=25 and sample_method='dpm_solver'. 
-  - When enabling full sampling, set 'cfg.sample.save_cropped_imgs' to True and 'cfg.sample.fix_seed' to False. 
 
   
 
