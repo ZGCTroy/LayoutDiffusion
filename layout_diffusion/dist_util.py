@@ -7,7 +7,6 @@ import os
 import socket
 
 import blobfile as bf
-from mpi4py import MPI
 import torch as th
 import torch.distributed as dist
 
