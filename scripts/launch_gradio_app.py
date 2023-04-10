@@ -104,7 +104,7 @@ def layout_to_image_generation(cfg, model_fn, noise_schedule, custom_layout_dict
 @torch.no_grad()
 def init():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config_file", type=str, default='./configs/COCO-stuff_256x256/LayoutDiffusion-v7_small.yaml')
+    parser.add_argument("--config_file", type=str, default='./configs/COCO-stuff_256x256/LayoutDiffusion_large.yaml')
 
     known_args, unknown_args = parser.parse_known_args()
 

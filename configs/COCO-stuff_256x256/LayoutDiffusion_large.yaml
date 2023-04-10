@@ -122,7 +122,7 @@ train:
   micro_batch_size: 1
   save_interval: 10000
   log_interval: 1000
-  log_dir: './log/COCO-stuff_256x256/LayoutDiffusion-v7_large'
+  log_dir: './log/COCO-stuff_256x256/LayoutDiffusion_large'
   use_fp16: True
   fp16_scale_growth: 1e-3
   weight_decay: 0.0
@@ -135,14 +135,14 @@ train:
 sample:
   fix_seed: True
   use_fp16: True
-  log_root: '/workspace/mnt/storage/guangcongzheng/zju_zgc_backup/samples/COCO-stuff_256x256/LayoutDiffusion-v7_large'
-  sample_suffix: 'model0400000'
-  pretrained_model_path: './log/COCO-stuff_256x256/LayoutDiffusion-v7_large/ema_0.9999_0400000.pt'
+  log_root: '/workspace/mnt/storage/guangcongzheng/zju_zgc_backup/samples/COCO-stuff_256x256/LayoutDiffusion_large'
+  sample_suffix: 'model1150000'
+  pretrained_model_path: './pretrained_models/COCO-stuff_256x256_LayoutDiffusion_large_ema_1150000.pt'
   classifier_free: True
   classifier_free_scale: 1.0
   sample_times: 1
   timestep_respacing: [ 200 ]
-  sample_method: 'ddpm'
+  sample_method: 'dpm_solver'
   clip_denoised: True
   save_cropped_images: False
   save_images_with_bboxs: False
