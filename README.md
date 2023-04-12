@@ -71,21 +71,12 @@ python -m torch.distributed.launch \
        --config_file ./configs/COCO-stuff_256x256/LayoutDiffusion_large.yaml
 ```
 
+## Sampling
+* bash/quick_sample.bash for quick sample
+* bash/sample.bash for sample entire test dataset
+
 ## Evaluation (To be continued)
 
-- Sampling for the entire validation dataset: 
-  - Refer to 'bash/sample.bash'. 
-  - Currently, the recommended settings are steps=25 and sample_method='dpm_solver'. 
-  - When enabling full sampling, set 'cfg.sample.save_cropped_imgs' to True and 'cfg.sample.fix_seed' to False. 
-
-- quick sample
-  - Three sampling methods are available: ddpm, ddim, and dpm_solver. 
-  - For selecting images of medium quality, it is recommended to use steps=25 and sample_method='dpm_solver'. 
-  - For selecting images of high quality, it is recommended to use steps=200 and sample_method='ddim'. For high-quality images with steps=200 or 1000, it is recommended to use sample_method='ddpm'. 
-  - The classifier scale should be set to 0.7, with an adjustable range of +- 0.5. 
-  - Set cfg.sample.fix_seed=True, cfg.sample.save_cropped_images=False, cfg.sample.save_images_with_bboxs=True, and cfg.sample.save_sequence_of_obj_imgs=True. 
-  - For data sampling, set data.parameters.test.max_num_samples=64 to select the first 64 images in the data set, and data.parameters.test.batch_size=8. 
-  - To select specific image IDs for COCO-stuff, set data.parameters.test.specific_image_ids='['VG_100K_2/103.jpg', 'VG_100K_2/113.jpg']', with specific_image_ids having a higher priority than max_num_samples. To select image IDs for VG, set data.parameters.test.specific_image_ids='[87038, 174482]'.
 
 ## For beginner
 The field of layout-to-image generation is related to scenegraph-to-image generation and remained some confusing issues.

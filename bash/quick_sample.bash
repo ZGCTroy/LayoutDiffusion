@@ -2,8 +2,7 @@ WORKSPACE='/workspace/mnt/storage/guangcongzheng/zju_zgc/LayoutDiffusion'
 cd ${WORKSPACE}
 
 
-VERSION='LayoutDiffusion-v7_large'
-CLASSIFIER_SCALE=1.05
+CLASSIFIER_SCALE=1.0
 SAMPLE_ROOT='/workspace/mnt/storage/guangcongzheng/zju_zgc_backup/samples'
 
 CUDA_VISIBLE_DEVICES=0,1 \
