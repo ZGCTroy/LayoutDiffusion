@@ -2,7 +2,7 @@
 
 - [ ] Improve README and code usage instructions
 - [ ] Clean up code 
-- [ ] Release tools for evaluation
+- [x] Release tools for evaluation
 - [x] 2023-04-09: Release [pre-trained model](https://drive.google.com/drive/folders/1sJxbhi_pioFaHKgAAAuo8wZLIBuLbyxz?usp=sharing) 
 - [x] 2023-04-09: Release instructions for environment and training 
 - [x] 2023-04-09: Release Gradio Webui Demo
@@ -75,7 +75,61 @@ python -m torch.distributed.launch \
 * bash/quick_sample.bash for quick sample
 * bash/sample.bash for sample entire test dataset
 
-## Evaluation (To be continued)
+## Evaluation
+
+**[Important] In each metrics, you should first configure the environment according to the specified repo.**
+
+### FID
+Fr‘echet Inception Distance (FID) were evaluated by using [TTUR](https://github.com/bioinf-jku/TTUR). 
+
+After sampling, using the following command to measure the FID score:
+```bash
+CUDA_VISIBLE_DEVICES=0 python fid.py path/to/generated_imgs path/to/gt_imgs --gpu 0
+```
+
+### IS
+Inception Score (IS) were evaluated by using [Improved-GAN](https://github.com/openai/improved-gan). 
+
+After sampling, using the following command to measure the IS:
+```bash
+cd inception_score
+CUDA_VISIBLE_DEVICES=0 python model.py --path path/to/generated_imgs
+```
+
+### DS
+Diversity Score (DS) were evaluated by using [PerceptualSimilarity](https://github.com/richzhang/PerceptualSimilarity). 
+
+We modified `lpips_2dirs.py` to make it easier to calculate the mean and variance of DS automatically, please refer [this](scripts/lpips_2dirs.py).
+
+After sampling, using the following command to measure the IS:
+```bash
+CUDA_VISIBLE_DEVICES=0 python lpips_2dirs.py -d0 path/to/generated_imgs_0 -d1 path/to/generated_imgs_1 -o imgs/example_dists.txt --use_gpu
+```
+
+
+### YOLO Score
+YOLO Score were evaluated by using [LAMA](https://github.com/ZejianLi/LAMA).
+
+Since we filter the objects and images in datasets, we think it is better to evaluate bbox mAP only on filtered annotations. So we modified [`test.py`](scripts/lama_yoloscore_test.py) to measure YOLO Score both on full annotations(using `instances_val2017.json` in coco dataset) and [filtered annotations](https://drive.google.com/file/d/1T5A2AwNF2gZmi2LDArkE7ycBwGDuhq4w/view?usp=sharing).
+
+After sampling, using the following command to measure the YOLO Score:
+```bash
+cd yolo_experiments
+cd data
+CUDA_VISIBLE_DEVICES=0 python test.py --image_path path/to/generated_imgs
+```
+
+
+### CAS
+Classification Score (CAS) were evaluated by using [pytorch_image_classification](https://github.com/hysts/pytorch_image_classification).
+
+We crop the GT box area of images and resize objects at a resolution of 32×32 with their class. Then train a ResNet101 classifier with cropped images on generated images and test it on cropped images on real images. Finally, measuring CAS using the generated images.
+
+```bash
+CUDA_VISIBLE_DEVICES=0 python evaluate.py --config configs/test.yaml
+```
+
+You should configure the ckpt path and dataset info in `configs/test.yaml`.
 
 
 ## For beginner
