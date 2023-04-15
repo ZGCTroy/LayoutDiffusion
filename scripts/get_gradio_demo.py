@@ -70,8 +70,11 @@ def get_demo(layout_to_image_generation_fn, cfg, model_fn, noise_schedule):
                 continue
 
             color = colors[obj_id]
-            obj_bbox = custom_layout_dataframe['obj_bbox'][obj_id]
-            x0, y0, x1, y1 = int(obj_bbox[0] * 256), int(obj_bbox[1] * 256), int(obj_bbox[2] * 256), int(obj_bbox[3] * 256)
+            x0, y0, x1, y1 = custom_layout_dataframe['obj_bbox_x0'][obj_id], custom_layout_dataframe['obj_bbox_y0'][obj_id], \
+                    custom_layout_dataframe['obj_bbox_x1'][obj_id], custom_layout_dataframe['obj_bbox_y1'][obj_id]
+
+            x0, y0, x1, y1 = int(float(x0) * 256), int(float(y0) * 256), int(float(x1) * 256), int(float(y1) * 256)
+
             x, y, w, h = x0, y0, x1 - x0, y1 - y0
 
             cv2.rectangle(bgr_img, (x, y), (x + w, y + h), color, 2)
@@ -97,11 +100,10 @@ def get_demo(layout_to_image_generation_fn, cfg, model_fn, noise_schedule):
         with gr.Row():
             with gr.Column():
                 custom_layout_dataframe = gr.Dataframe(
-                    headers=["obj_id", "obj_class", "obj_bbox"],
-                    datatype=["number", "str", "number"],
-                    row_count=num_obj + 2,
-                    col_count=(3, "fixed"),
-                    interactive=False
+                    headers=["obj_id", "obj_class", "obj_bbox_x0","obj_bbox_y0","obj_bbox_x1","obj_bbox_y1"],
+                    datatype=["number", "str", "number","number","number","number"],
+                    row_count=(num_obj + 2, "fixed"),
+                    col_count=(6, "fixed"),
                 )
 
             with gr.Column():
@@ -127,42 +129,42 @@ def get_demo(layout_to_image_generation_fn, cfg, model_fn, noise_schedule):
         gr.Examples(
             examples=[
                 [
-                    [[0, 'image', [0.0, 0.0, 1.0, 1.0]],
-                     [1, 'tree', [0.0, 0.0, 1.0, 0.2750000059604645]],
-                     [2, 'grass', [0.0, 0.14166666567325592, 1.0, 1.0], ],
-                     [3, 'zebra', [0.18989062309265137, 0.23635415732860565, 0.8281093835830688, 0.8176667094230652]],
-                     [4, 'pad', [0.0, 0.0, 0.0, 0.0]],
-                     [5, 'pad', [0.0, 0.0, 0.0, 0.0]],
-                     [6, 'pad', [0.0, 0.0, 0.0, 0.0]],
-                     [7, 'pad', [0.0, 0.0, 0.0, 0.0]],
-                     [8, 'pad', [0.0, 0.0, 0.0, 0.0]],
-                     [9, 'pad', [0.0, 0.0, 0.0, 0.0]]],
+                    [[0, 'image', 0.0, 0.0, 1.0, 1.0],
+                     [1, 'tree', 0.0, 0.0, 1.0, 0.2750000059604645],
+                     [2, 'grass', 0.0, 0.14166666567325592, 1.0, 1.0, ],
+                     [3, 'zebra', 0.18989062309265137, 0.23635415732860565, 0.8281093835830688, 0.8176667094230652],
+                     [4, 'pad', 0.0, 0.0, 0.0, 0.0],
+                     [5, 'pad', 0.0, 0.0, 0.0, 0.0],
+                     [6, 'pad', 0.0, 0.0, 0.0, 0.0],
+                     [7, 'pad', 0.0, 0.0, 0.0, 0.0],
+                     [8, 'pad', 0.0, 0.0, 0.0, 0.0],
+                     [9, 'pad', 0.0, 0.0, 0.0, 0.0]],
                     1.0, 25, 3739045
                 ],
                 [
-                    [[0, 'image', [0.0, 0.0, 1.0, 1.0]],
-                     [1, 'train', [0.09859374910593033, 0.24045585095882416, 0.9391249418258667, 0.8741595149040222]],
-                     [2, 'pavement', [0.0, 0.49857550859451294, 1.0, 1.0]],
-                     [3, 'sky-other', [0.0, 0.0, 0.515625, 0.5441595315933228]],
-                     [4, 'tree', [0.28125, 0.0, 1.0, 0.41310539841651917]],
-                     [5, 'wall-other', [0.8999999761581421, 0.3817663788795471, 1.0, 0.692307710647583]],
-                     [6, 'pad', [0.0, 0.0, 0.0, 0.0]],
-                     [7, 'pad', [0.0, 0.0, 0.0, 0.0]],
-                     [8, 'pad', [0.0, 0.0, 0.0, 0.0]],
-                     [9, 'pad', [0.0, 0.0, 0.0, 0.0]]],
+                    [[0, 'image', 0.0, 0.0, 1.0, 1.0],
+                     [1, 'train', 0.09859374910593033, 0.24045585095882416, 0.9391249418258667, 0.8741595149040222],
+                     [2, 'pavement', 0.0, 0.49857550859451294, 1.0, 1.0],
+                     [3, 'sky-other', 0.0, 0.0, 0.515625, 0.5441595315933228],
+                     [4, 'tree', 0.28125, 0.0, 1.0, 0.41310539841651917],
+                     [5, 'wall-other', 0.8999999761581421, 0.3817663788795471, 1.0, 0.692307710647583],
+                     [6, 'pad', 0.0, 0.0, 0.0, 0.0],
+                     [7, 'pad', 0.0, 0.0, 0.0, 0.0],
+                     [8, 'pad', 0.0, 0.0, 0.0, 0.0],
+                     [9, 'pad', 0.0, 0.0, 0.0, 0.0]],
                     1.0, 25, 7296572
                 ],
                 [
-                    [[0, 'image', [0.0, 0.0, 1.0, 1.0]],
-                     [1, 'desk-stuff', [0.0, 0.5791666507720947, 1.0, 1.0]],
-                     [2, 'laptop', [0.001687500043772161, 0.41574999690055847, 0.3943749964237213, 0.9820416569709778]],
-                     [3, 'window-blind', [0.0, 0.0, 0.25312501192092896, 0.4791666567325592]],
-                     [4, 'plastic', [0.20000000298023224, 0.05000000074505806, 1.0, 0.7208333611488342]],
-                     [5, 'wall-concrete', [0.17812499403953552, 0.0, 1.0, 0.5916666388511658]],
-                     [6, 'keyboard', [0.503531277179718, 0.6351667046546936, 0.9857500195503235, 0.824833333492279]],
-                     [7, 'tv', [0.39268749952316284, 0.04774999991059303, 0.7415624856948853, 0.4207916557788849]],
-                     [8, 'light', [0.840624988079071, 0.02083333395421505, 0.925000011920929, 0.42500001192092896]],
-                     [9, 'pad', [0.0, 0.0, 0.0, 0.0]]],
+                    [[0, 'image', 0.0, 0.0, 1.0, 1.0],
+                     [1, 'desk-stuff', 0.0, 0.5791666507720947, 1.0, 1.0],
+                     [2, 'laptop', 0.001687500043772161, 0.41574999690055847, 0.3943749964237213, 0.9820416569709778],
+                     [3, 'window-blind', 0.0, 0.0, 0.25312501192092896, 0.4791666567325592],
+                     [4, 'plastic', 0.20000000298023224, 0.05000000074505806, 1.0, 0.7208333611488342],
+                     [5, 'wall-concrete', 0.17812499403953552, 0.0, 1.0, 0.5916666388511658],
+                     [6, 'keyboard', 0.503531277179718, 0.6351667046546936, 0.9857500195503235, 0.824833333492279],
+                     [7, 'tv', 0.39268749952316284, 0.04774999991059303, 0.7415624856948853, 0.4207916557788849],
+                     [8, 'light', 0.840624988079071, 0.02083333395421505, 0.925000011920929, 0.42500001192092896],
+                     [9, 'pad', 0.0, 0.0, 0.0, 0.0]],
                     1.0, 25, 290
                 ],
             ],
@@ -192,28 +194,44 @@ def get_demo(layout_to_image_generation_fn, cfg, model_fn, noise_schedule):
             custom_layout_dataframe = {
                 'obj_id': [],
                 'obj_class': [],
-                'obj_bbox': []
+                'obj_bbox_x0': [],
+                'obj_bbox_y0': [],
+                'obj_bbox_x1': [],
+                'obj_bbox_y1': [],
             }
             custom_layout_dataframe['obj_id'].append(0)
             custom_layout_dataframe['obj_class'].append('image')
-            custom_layout_dataframe['obj_bbox'].append([0.0, 0.0, 1.0, 1.0])
+            custom_layout_dataframe['obj_bbox_x0'].append(0)
+            custom_layout_dataframe['obj_bbox_y0'].append(0)
+            custom_layout_dataframe['obj_bbox_x1'].append(1)
+            custom_layout_dataframe['obj_bbox_y1'].append(1)
 
             for obj_id in range(custom_layout_dict['num_obj']):
                 custom_layout_dataframe['obj_id'].append(obj_id + 1)
                 custom_layout_dataframe['obj_class'].append(custom_layout_dict['obj_class'][obj_id])
-                custom_layout_dataframe['obj_bbox'].append(custom_layout_dict['obj_bbox'][obj_id])
+                custom_layout_dataframe['obj_bbox_x0'].append(custom_layout_dict['obj_bbox'][obj_id][0])
+                custom_layout_dataframe['obj_bbox_y0'].append(custom_layout_dict['obj_bbox'][obj_id][1])
+                custom_layout_dataframe['obj_bbox_x1'].append(custom_layout_dict['obj_bbox'][obj_id][2])
+                custom_layout_dataframe['obj_bbox_y1'].append(custom_layout_dict['obj_bbox'][obj_id][3])
 
             custom_layout_dataframe['obj_id'].append(custom_layout_dict['num_obj'] + 1)
             custom_layout_dataframe['obj_class'].append('pad')
-            custom_layout_dataframe['obj_bbox'].append([0.0, 0.0, 0.0, 0.0])
+            custom_layout_dataframe['obj_bbox_x0'].append(0)
+            custom_layout_dataframe['obj_bbox_y0'].append(0)
+            custom_layout_dataframe['obj_bbox_x1'].append(0)
+            custom_layout_dataframe['obj_bbox_y1'].append(0)
 
             return pd.DataFrame(custom_layout_dataframe)
 
         def custom_layout_dataframe_to_dict(custom_layout_dataframe):
+            obj_bbox = []
+            for x0,y0,x1,y1 in zip(custom_layout_dataframe['obj_bbox_x0'],custom_layout_dataframe['obj_bbox_y0']
+                    ,custom_layout_dataframe['obj_bbox_x1'], custom_layout_dataframe['obj_bbox_y1']):
+                obj_bbox.append([float(x0),float(y0),float(x1),float(y1)])
             custom_layout_dict = {
                 'num_obj': len(custom_layout_dataframe),
                 'obj_class': custom_layout_dataframe['obj_class'],
-                'obj_bbox': custom_layout_dataframe['obj_bbox']
+                'obj_bbox': obj_bbox
             }
             return custom_layout_dict
 
