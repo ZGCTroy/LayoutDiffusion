@@ -14,9 +14,11 @@ def get_obj_from_str(string, reload=False):
     return getattr(importlib.import_module(module, package=None), cls)
 
 
-def fix_seed():
+def fix_seed(seed=23333):
 
-    seed = 23333 + dist.get_rank()
+    if dist.is_initialized():
+        seed = seed + dist.get_rank()
+
     np.random.seed(seed)
     torch.manual_seed(seed)  # CPU随机种子确定
     torch.cuda.manual_seed(seed)  # GPU随机种子确定
