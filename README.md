@@ -50,6 +50,7 @@ python setup.py build develop
   --config_file configs/COCO-stuff_256x256/LayoutDiffusion_large.yaml \
   sample.pretrained_model_path=./pretrained_models/COCO-stuff_256x256_LayoutDiffusion_large_ema_1150000.pt
 ```
+add '--share' after '--config_file XXX' to allow for remote link share
 
 ## Setup Dataset
 See [here](./DATASET_SETUP.md)

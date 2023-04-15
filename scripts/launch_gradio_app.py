@@ -104,7 +104,8 @@ def layout_to_image_generation(cfg, model_fn, noise_schedule, custom_layout_dict
 @torch.no_grad()
 def init():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config_file", type=str, default='./configs/COCO-stuff_256x256/LayoutDiffusion_large.yaml')
+    parser.add_argument("--config_file", type=str, default='./configs/COCO-stuff_256x256/LayoutDiffusion-v7_small.yaml')
+    parser.add_argument("--share", action='store_true')
 
     known_args, unknown_args = parser.parse_known_args()
 
@@ -124,8 +125,7 @@ def init():
     if cfg.sample.pretrained_model_path:
         print("loading model from {}".format(cfg.sample.pretrained_model_path))
         checkpoint = torch.load(cfg.sample.pretrained_model_path, map_location="cpu")
-        for key in checkpoint.keys():
-            print(key)
+
         try:
             model.load_state_dict(checkpoint, strict=True)
             print('successfully load the entire model')
@@ -192,4 +192,4 @@ if __name__ == "__main__":
 
     demo = get_demo(layout_to_image_generation, cfg, model_fn, noise_schedule)
 
-    demo.launch(share=True)
+    demo.launch(share=cfg.share)
