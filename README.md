@@ -14,7 +14,9 @@
 
 
 ## Introduction
-This repository is the official implementation of CVPR2023: [LayoutDiffusion: Controllable Diffusion Model for Layout-to-image Generation](https://arxiv.org/abs/2303.17189)
+This repository is the official implementation of CVPR2023: LayoutDiffusion: Controllable Diffusion Model for Layout-to-image Generation.
+
+* links: [arxiv](https://arxiv.org/abs/2303.17189), [cvpr open access paper pdf](https://openaccess.thecvf.com/content/CVPR2023/papers/Zheng_LayoutDiffusion_Controllable_Diffusion_Model_for_Layout-to-Image_Generation_CVPR_2023_paper.pdf), [cvpr open access supplement pdf](https://openaccess.thecvf.com/content/CVPR2023/supplemental/Zheng_LayoutDiffusion_Controllable_Diffusion_CVPR_2023_supplemental.pdf)
 
 The code is heavily based on [openai/guided-diffusion](https://github.com/openai/guided-diffusion), 
 with the following modifications:
