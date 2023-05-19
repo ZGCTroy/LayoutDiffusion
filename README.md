@@ -146,6 +146,15 @@ However, it is recommended to ignore the confusing history and follow the latest
 
 ## Cite
 ```
+@InProceedings{Zheng_2023_CVPR,
+    author    = {Zheng, Guangcong and Zhou, Xianpan and Li, Xuewei and Qi, Zhongang and Shan, Ying and Li, Xi},
+    title     = {LayoutDiffusion: Controllable Diffusion Model for Layout-to-Image Generation},
+    booktitle = {Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR)},
+    month     = {June},
+    year      = {2023},
+    pages     = {22490-22499}
+}
+
 @misc{zheng2023layoutdiffusion,
     title={LayoutDiffusion: Controllable Diffusion Model for Layout-to-image Generation}, 
     author={Guangcong Zheng and Xianpan Zhou and Xuewei Li and Zhongang Qi and Ying Shan and Xi Li},
