@@ -13,9 +13,11 @@
 
 
 
+
 ## Introduction
 This repository is the official implementation of CVPR2023: LayoutDiffusion: Controllable Diffusion Model for Layout-to-image Generation.
-
+[![PWC](https://img.shields.io/endpoint.svg?url=https://paperswithcode.com/badge/layoutdiffusion-controllable-diffusion-model/layout-to-image-generation-on-coco-stuff-4)](https://paperswithcode.com/sota/layout-to-image-generation-on-coco-stuff-4?p=layoutdiffusion-controllable-diffusion-model)
+[![PWC](https://img.shields.io/endpoint.svg?url=https://paperswithcode.com/badge/layoutdiffusion-controllable-diffusion-model/layout-to-image-generation-on-visual-genome-4)](https://paperswithcode.com/sota/layout-to-image-generation-on-visual-genome-4?p=layoutdiffusion-controllable-diffusion-model)
 * links: [arxiv](https://arxiv.org/abs/2303.17189), [cvpr open access paper pdf](https://openaccess.thecvf.com/content/CVPR2023/papers/Zheng_LayoutDiffusion_Controllable_Diffusion_Model_for_Layout-to-Image_Generation_CVPR_2023_paper.pdf), [cvpr open access supplement pdf](https://openaccess.thecvf.com/content/CVPR2023/supplemental/Zheng_LayoutDiffusion_Controllable_Diffusion_CVPR_2023_supplemental.pdf)
 
 The code is heavily based on [openai/guided-diffusion](https://github.com/openai/guided-diffusion), 
@@ -60,7 +62,7 @@ See [here](./DATASET_SETUP.md)
 ## Pretrained Models
 | Dataset                                                                                                                                   | Resolution |                   steps, FID (Sample imgs x times)                   | Link (TODO)                                                                                            |
 |-------------------------------------------------------------------------------------------------------------------------------------------|:----------:|:--------------------------------------------------------------------:|--------------------------------------------------------------------------------------------------------|
-| COCO-Stuff 2017 segmentation challenge<br/>([deprecated coco-stuff, not full coco-stuff](https://github.com/WillSuen/LostGANs/issues/19)) | 256 x 256  | steps=25 <br/> FID=15.61  ( 3097 x 5 ) <br/> FID=15.61  ( 2048 x 1 ) | [Google drive](https://drive.google.com/file/d/1aWIh-jPzNqXZibq8HlSeQfQzyXO8aMUK/view?usp=share_link)  | 
+| COCO-Stuff 2017 segmentation challenge<br/>([deprecated coco-stuff, not full coco-stuff](https://github.com/WillSuen/LostGANs/issues/19)) | 256 x 256  | steps=25 <br/> FID=15.61  ( 3097 x 5 ) <br/> FID=31.68  ( 2048 x 1 ) | [Google drive](https://drive.google.com/file/d/1aWIh-jPzNqXZibq8HlSeQfQzyXO8aMUK/view?usp=share_link)  | 
 | COCO-Stuff 2017 segmentation challenge<br/>([deprecated coco-stuff, not full coco-stuff](https://github.com/WillSuen/LostGANs/issues/19)) | 128 x 128  |               steps=25 <br/>  FID=16.57  ( 3097 x 5 )                | [Google drive](https://drive.google.com/file/d/1LoNKfGabuXc53gh1FYGbVvwbJZjpjE3a/view?usp=share_link)  | 
 | VG                                                                                                                                        | 256 x 256  |               steps=25 <br/>  FID=15.63  ( 5097 x 1 )                | [Google drive](https://drive.google.com/file/d/16CV4a-4e8gyzOemK8XP0j4KwNL8PGb1L/view?usp=share_link)  | 
 | VG                                                                                                                                        | 128 x 128  |               steps=25 <br/>  FID=16.35  ( 5097 x 1 )                | [Google drive](https://drive.google.com/file/d/1NaC3oS9uG0DmgU8VgIDB-xESauczuAaV/view?usp=share_link)  | 
@@ -155,14 +157,5 @@ However, it is recommended to ignore the confusing history and follow the latest
     month     = {June},
     year      = {2023},
     pages     = {22490-22499}
-}
-
-@misc{zheng2023layoutdiffusion,
-    title={LayoutDiffusion: Controllable Diffusion Model for Layout-to-image Generation}, 
-    author={Guangcong Zheng and Xianpan Zhou and Xuewei Li and Zhongang Qi and Ying Shan and Xi Li},
-    year={2023},
-    eprint={2303.17189},
-    archivePrefix={arXiv},
-    primaryClass={cs.CV}
 }
 ```
