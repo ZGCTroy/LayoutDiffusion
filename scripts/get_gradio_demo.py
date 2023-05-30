@@ -6,52 +6,8 @@ import pandas as pd
 
 
 def get_demo(layout_to_image_generation_fn, cfg, model_fn, noise_schedule):
-    class_names = ['person', 'bicycle', 'car', 'motorcycle', 'airplane', 'bus', 'train', 'truck', 'boat', 'traffic light', 'fire hydrant', 'stop sign', 'parking meter',
-                   'bench', 'bird', 'cat', 'dog', 'horse', 'sheep', 'cow', 'elephant', 'bear', 'zebra', 'giraffe', 'backpack', 'umbrella', 'handbag',
-                   'tie', 'suitcase', 'frisbee', 'skis', 'snowboard', 'sports ball', 'kite', 'baseball bat', 'baseball glove', 'skateboard', 'surfboard',
-                   'tennis racket', 'bottle', 'wine glass', 'cup', 'fork', 'knife', 'spoon', 'bowl', 'banana', 'apple', 'sandwich', 'orange', 'broccoli',
-                   'carrot', 'hot dog', 'pizza', 'donut', 'cake', 'chair', 'couch', 'potted plant', 'bed', 'dining table', 'toilet', 'tv', 'laptop',
-                   'mouse', 'remote', 'keyboard', 'cell phone', 'microwave', 'oven', 'toaster', 'sink', 'refrigerator', 'book', 'clock', 'vase', 'scissors',
-                   'teddy bear', 'hair drier', 'toothbrush', 'banner', 'blanket', 'branch', 'bridge', 'building-other', 'bush', 'cabinet', 'cage', 'cardboard',
-                   'carpet', 'ceiling-other', 'ceiling-tile', 'cloth', 'clothes', 'clouds', 'counter', 'cupboard', 'curtain', 'desk-stuff', 'dirt',
-                   'door-stuff', 'fence', 'floor-marble', 'floor-other', 'floor-stone', 'floor-tile', 'floor-wood', 'flower', 'fog', 'food-other', 'fruit',
-                   'furniture-other', 'grass', 'gravel', 'ground-other', 'hill', 'house', 'leaves', 'light', 'mat', 'metal', 'mirror-stuff', 'moss',
-                   'mountain', 'mud', 'napkin', 'net', 'paper', 'pavement', 'pillow', 'plant-other', 'plastic', 'platform', 'playingfield', 'railing',
-                   'railroad', 'river', 'road', 'rock', 'roof', 'rug', 'salad', 'sand', 'sea', 'shelf', 'sky-other', 'skyscraper', 'snow',
-                   'solid-other', 'stairs', 'stone', 'straw', 'structural-other', 'table', 'tent', 'textile-other', 'towel', 'tree', 'vegetable',
-                   'wall-brick', 'wall-concrete', 'wall-other', 'wall-panel', 'wall-stone', 'wall-tile', 'wall-wood', 'water-other', 'waterdrops',
-                   'window-blind', 'window-other', 'wood', 'other', 'image', 'pad']
-
     colors = [(255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0), (0, 255, 255), (255, 0, 255), (128, 0, 0), (0, 128, 0),
               (0, 0, 128), (128, 128, 0), (0, 128, 128), (128, 0, 128), (64, 0, 0), (0, 64, 0), (0, 0, 64)]
-
-    def calculate_bbox(mask, class_name, custom_layout_dict):
-        '''
-        :param img: RGB
-        :param mask: Gray
-        :param class_name: str
-        :return:
-        '''
-        custom_layout_dict['num_obj'] += 1
-
-        if np.all(mask == 0):
-            custom_layout_dict['obj_class'].append('pad')
-            custom_layout_dict['obj_bbox'].append([0.0, 0.0, 0.0, 0.0])
-            return custom_layout_dict
-
-        # 对灰度图像应用阈值处理，创建 mask
-        gray_mask = cv2.cvtColor(mask, cv2.COLOR_RGB2GRAY)
-        _, binary_mask = cv2.threshold(gray_mask, 1, 255, cv2.THRESH_BINARY)
-        contours, _ = cv2.findContours(binary_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-        all_unique_contours = np.vstack(contours)
-        all_unique_contours = np.unique(all_unique_contours, axis=0)
-        x, y, w, h = cv2.boundingRect(all_unique_contours)
-
-        custom_layout_dict['obj_class'].append(class_name)
-        custom_layout_dict['obj_bbox'].append([float(_) / 256.0 for _ in [x, y, x + w, y + h]])
-
-        return custom_layout_dict
 
     def update_layout_image(custom_layout_dataframe):
         '''
@@ -104,6 +60,7 @@ def get_demo(layout_to_image_generation_fn, cfg, model_fn, noise_schedule):
                     datatype=["number", "str", "number","number","number","number"],
                     row_count=(num_obj + 2, "fixed"),
                     col_count=(6, "fixed"),
+                    interactive=False
                 )
 
             with gr.Column():
@@ -119,7 +76,7 @@ def get_demo(layout_to_image_generation_fn, cfg, model_fn, noise_schedule):
                     steps = gr.Slider(value=25, minimum=25, maximum=200, label='Steps')
 
                 with gr.Row():
-                    seed = gr.Number(value=2333, precision=0, label='Seed')
+                    seed = gr.Number(value=2333, precision=0, label='Seed', interactive=False)
                     button_to_random_seed = gr.Button(value='random seed')
                     button_to_random_seed.click(
                         fn=lambda : int(np.random.randint(low=1, high=9999999, size=1)),
@@ -174,55 +131,6 @@ def get_demo(layout_to_image_generation_fn, cfg, model_fn, noise_schedule):
             label='Update Layout Using Examples'
         )
 
-        obj_class_list, obj_mask_list, obj_bbox_list = [], [], []
-        with gr.Accordion('Construct a Layout by drawing object one-by-one', visible=True, open=False):
-            gr.Markdown(
-                """
-            Draw each object and click "Update Layout Image by Painting". It is recommended to draw multiple objects that cover the whole image.
-            The stuff categories are necessary to act as the background.
-            """
-            )
-            button_to_construct_layout_by_drawing = gr.Button(value='Update Layout Image by Painting')
-
-            with gr.Row():
-                for obj_id in range(num_obj):
-                    with gr.Column(variant='panel'):
-                        obj_mask_list.append(gr.Image(source='canvas', tool='color-sketch', type='numpy', invert_colors=True, shape=(256, 256), label='obj_id={}'.format(obj_id + 1)))
-                        obj_class_list.append(gr.Dropdown(choices=class_names, value='pad', label='obj_class'))
-
-        def custom_layout_dict_to_dataframe(custom_layout_dict):
-            custom_layout_dataframe = {
-                'obj_id': [],
-                'obj_class': [],
-                'obj_bbox_x0': [],
-                'obj_bbox_y0': [],
-                'obj_bbox_x1': [],
-                'obj_bbox_y1': [],
-            }
-            custom_layout_dataframe['obj_id'].append(0)
-            custom_layout_dataframe['obj_class'].append('image')
-            custom_layout_dataframe['obj_bbox_x0'].append(0)
-            custom_layout_dataframe['obj_bbox_y0'].append(0)
-            custom_layout_dataframe['obj_bbox_x1'].append(1)
-            custom_layout_dataframe['obj_bbox_y1'].append(1)
-
-            for obj_id in range(custom_layout_dict['num_obj']):
-                custom_layout_dataframe['obj_id'].append(obj_id + 1)
-                custom_layout_dataframe['obj_class'].append(custom_layout_dict['obj_class'][obj_id])
-                custom_layout_dataframe['obj_bbox_x0'].append(custom_layout_dict['obj_bbox'][obj_id][0])
-                custom_layout_dataframe['obj_bbox_y0'].append(custom_layout_dict['obj_bbox'][obj_id][1])
-                custom_layout_dataframe['obj_bbox_x1'].append(custom_layout_dict['obj_bbox'][obj_id][2])
-                custom_layout_dataframe['obj_bbox_y1'].append(custom_layout_dict['obj_bbox'][obj_id][3])
-
-            custom_layout_dataframe['obj_id'].append(custom_layout_dict['num_obj'] + 1)
-            custom_layout_dataframe['obj_class'].append('pad')
-            custom_layout_dataframe['obj_bbox_x0'].append(0)
-            custom_layout_dataframe['obj_bbox_y0'].append(0)
-            custom_layout_dataframe['obj_bbox_x1'].append(0)
-            custom_layout_dataframe['obj_bbox_y1'].append(0)
-
-            return pd.DataFrame(custom_layout_dataframe)
-
         def custom_layout_dataframe_to_dict(custom_layout_dataframe):
             obj_bbox = []
             for x0,y0,x1,y1 in zip(custom_layout_dataframe['obj_bbox_x0'],custom_layout_dataframe['obj_bbox_y0']
@@ -234,31 +142,6 @@ def get_demo(layout_to_image_generation_fn, cfg, model_fn, noise_schedule):
                 'obj_bbox': obj_bbox
             }
             return custom_layout_dict
-
-        def update_layout_image_by_drawing(*args, **kwargs):
-            custom_layout_dict = {
-                'num_obj': 0,
-                'obj_class': [],
-                'obj_bbox': []
-            }
-
-            for obj_id in range(num_obj):
-                obj_class = args[obj_id]
-                obj_mask = args[num_obj + obj_id]
-
-                if obj_mask is None:
-                    obj_mask = np.zeros((256, 256, 3), dtype=np.uint8)
-
-                custom_layout_dict = calculate_bbox(mask=obj_mask, class_name=obj_class, custom_layout_dict=custom_layout_dict)
-
-            print(custom_layout_dict)
-
-            custom_layout_dataframe = custom_layout_dict_to_dataframe(custom_layout_dict)
-            updated_layout_image = update_layout_image(custom_layout_dataframe)
-
-            return updated_layout_image, custom_layout_dataframe
-
-        button_to_construct_layout_by_drawing.click(fn=update_layout_image_by_drawing, inputs=obj_class_list + obj_mask_list, outputs=[layout_image, custom_layout_dataframe])
 
         def layout_to_image_generation(custom_layout_dataframe, classifier_free_scale, steps, seed):
             if cfg.sample.fix_seed:
