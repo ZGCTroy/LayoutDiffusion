@@ -77,11 +77,6 @@ def get_demo(layout_to_image_generation_fn, cfg, model_fn, noise_schedule):
 
                 with gr.Row():
                     seed = gr.Number(value=2333, precision=0, label='Seed', interactive=False)
-                    button_to_random_seed = gr.Button(value='random seed')
-                    button_to_random_seed.click(
-                        fn=lambda : int(np.random.randint(low=1, high=9999999, size=1)),
-                        outputs=[seed],
-                    )
 
         gr.Examples(
             examples=[
