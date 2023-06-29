@@ -1,21 +1,21 @@
 model:
   type: layout_diffusion.layout_diffusion_unet.LayoutDiffusionUNetModel
   parameters:
-    image_size: 256
+    image_size: 32
     use_fp16: True
     use_scale_shift_norm: True
-    in_channels: 3
-    out_channels: 6
+    in_channels: 4
+    out_channels: 8
     model_channels: 256
     encoder_channels: 256 # assert same as layout_encoder.hidden_dim
-    num_head_channels: 64
+    num_head_channels: 32
     num_heads: -1
     num_heads_upsample: -1
     num_res_blocks: 2
     num_attention_blocks: 1
     resblock_updown: True
-    attention_ds: [ 32, 16, 8 ]
-    channel_mult: [ 1, 1, 2, 2, 4, 4 ]
+    attention_ds: [ 4, 2, 1 ]
+    channel_mult: [ 1, 2, 4 ]
     dropout: 0.0
     use_checkpoint: False
     use_positional_embedding_for_attention: True
@@ -34,7 +34,7 @@ model:
         num_heads: 8
         use_final_ln: True
         use_positional_embedding: False
-        resolution_to_attention: [ 32, 16, 8 ]
+        resolution_to_attention: [ 8, 16, 32 ]
         use_key_padding_mask: False
 
 
@@ -83,7 +83,7 @@ data:
       max_num_samples: null
       specific_image_ids: [ ]
       shuffle: True
-      batch_size: 4           # 8 GPUs, total_batch_size=4x8=32
+      batch_size: 16           # 2 GPUs, total_batch_size=2x16=32;     need 22GB memory per GPU
       left_right_flip: True
       use_MinIoURandomCrop: True
     val:
@@ -94,7 +94,7 @@ data:
       max_num_samples: 1024
       specific_image_ids: [ ]
       shuffle: False
-      batch_size: 8
+      batch_size: 16
       left_right_flip: False
       use_MinIoURandomCrop: False
 
@@ -113,16 +113,18 @@ data:
 
 
 train:
+  vae_root_dir: './pretrained_models/sd-vae-ft-ema'
+  latent_diffusion: True
   pretrained_model_path: ''
   resume_checkpoint: ''
   classifier_free: True
   classifier_free_dropout: 0.2
   lr: 1e-5
   ema_rate: "0.9999"
-  micro_batch_size: 1
+  micro_batch_size: -1
   save_interval: 10000
-  log_interval: 1000
-  log_dir: './log/COCO-stuff_256x256/LayoutDiffusion_large'
+  log_interval: 10
+  log_dir: './log/COCO-stuff_256x256/latent_LayoutDiffusion_large'
   use_fp16: True
   fp16_scale_growth: 1e-3
   weight_decay: 0.0

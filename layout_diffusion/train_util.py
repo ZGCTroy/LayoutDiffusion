@@ -48,7 +48,9 @@ class TrainLoop:
             classifier_free_dropout=0.0,
             pretrained_model_path='',
             log_dir="",
-            latent_diffusion=False
+            latent_diffusion=False,
+            vae_root_dir="",
+            scale_factor=0.18215
     ):
         self.log_dir =log_dir
         logger.configure(dir=log_dir)
@@ -139,6 +141,8 @@ class TrainLoop:
         self.classifier_free_dropout = classifier_free_dropout
         self.dropout_condition = False
 
+        self.scale_factor=scale_factor
+        self.vae_root_dir = vae_root_dir
         self.latent_diffusion = latent_diffusion
         if self.latent_diffusion:
             self.instantiate_first_stage()

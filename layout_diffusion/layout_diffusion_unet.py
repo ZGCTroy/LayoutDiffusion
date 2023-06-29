@@ -432,14 +432,6 @@ class ObjectAwareCrossAttention(nn.Module):
 
         self.proj_out = zero_module(conv_nd(1, channels, channels, 1))
 
-        # self.multi_head_attention = nn.MultiheadAttention(
-        #     embed_dim=channels,
-        #     kdim=channels,
-        #     vdim=channels,
-        #     num_heads=self.num_heads,
-        #     batch_first=True
-        # )
-
     def forward(self, x, cond_kwargs):
         '''
         :param x: (N, C, H, W)
@@ -459,7 +451,7 @@ class ObjectAwareCrossAttention(nn.Module):
             cond_kwargs['image_patch_bbox_embedding_for_resolution{}'.format(self.resolution)]
         )  # N x C x L1, 其中L1=H*W
         image_patch_positional_embedding = self.norm_for_image_patch_positional_embedding(image_patch_positional_embedding)  # (N, C, L1)
-        image_patch_positional_embedding = image_patch_positional_embedding.reshape(bs * self.num_heads, C // self.num_heads, L1)  # (N // num_heads, C // num_heads, L1)
+        image_patch_positional_embedding = image_patch_positional_embedding.reshape(bs * self.num_heads, C // self.num_heads, L1)  # (N * num_heads, C // num_heads, L1)
 
         # content embedding for image patch
         q_image_patch_content_embedding, k_image_patch_content_embedding, v_image_patch_content_embedding = qkv.split(C, dim=1)  # 3 x (N , C, L1)
@@ -491,14 +483,6 @@ class ObjectAwareCrossAttention(nn.Module):
         k_mix = th.cat([k_image_patch, k_layout], dim=2)  # (N // num_heads, 2 * C // num_heads, L1+L2)
         v_mix = th.cat([v_image_patch, v_layout], dim=2)  # (N // num_heads, 1 * C // num_heads, L1+L2)
 
-        #  cross multihead attention
-        # attn_output, attn_output_weights = self.multi_head_attention(
-        #     query=q_image_patch,
-        #     key=k_mix,
-        #     value=v_mix,
-        #     key_padding_mask=cond_kwargs['key_padding_mask'],
-        #     need_weights=True
-        # )
 
         key_padding_mask = torch.cat(
             [

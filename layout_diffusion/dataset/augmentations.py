@@ -236,7 +236,7 @@ class RandomSampleCrop(object):
         height, width, _ = image.shape
         while True:
             # randomly choose a mode
-            mode = random.choice(self.sample_options)
+            mode = self.sample_options[random.choice([0,1,2,3,4,5])]
             if mode is None:
                 return image, boxes, labels, [True for i in range(boxes.shape[0])]
 

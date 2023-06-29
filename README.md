@@ -76,8 +76,25 @@ See [here](./DATASET_SETUP.md)
 | VG                                                                                                                                        | 256 x 256  |               steps=25 <br/>  FID=15.63  ( 5097 x 1 )                | [Google drive](https://drive.google.com/file/d/16CV4a-4e8gyzOemK8XP0j4KwNL8PGb1L/view?usp=share_link)  | 
 | VG                                                                                                                                        | 128 x 128  |               steps=25 <br/>  FID=16.35  ( 5097 x 1 )                | [Google drive](https://drive.google.com/file/d/1NaC3oS9uG0DmgU8VgIDB-xESauczuAaV/view?usp=share_link)  | 
 
-## Training
-* bash/train.bash
+## Training on Latent Space
+* download the first stage model vae-8
+```bash
+    cd pretrained_models
+    git clone https://huggingface.co/stabilityai/sd-vae-ft-ema
+    cd sd-vae-ft-ema
+    wget https://huggingface.co/stabilityai/sd-vae-ft-ema/resolve/main/diffusion_pytorch_model.bin -O diffusion_pytorch_model.bin
+    wget https://huggingface.co/stabilityai/sd-vae-ft-ema/resolve/main/diffusion_pytorch_model.safetensors -O diffusion_pytorch_model.safetensors
+    pip install --upgrade diffusers[torch]
+```
+```bash
+python -m torch.distributed.launch \
+       --nproc_per_node 8 \
+       scripts/image_train_for_layout.py \
+       --config_file ./configs/COCO-stuff_256x256/latent_LayoutDiffusion_large.yaml
+```
+
+
+## Training on Image Space
 ```bash
 python -m torch.distributed.launch \
        --nproc_per_node 8 \

@@ -362,12 +362,6 @@ def main():
                                          os.path.join(log_dir, "obj_imgs_from_resized_gt_imgs/{}.png".format(filename)),
                                          nrow=cfg.data.parameters.layout_length)
 
-                    #     # save gt obj mask
-                    # if 'obj_mask' in list(cond.keys()):
-                    #     obj_mask = cond['obj_mask'][img_idx].reshape(-1, 1, cfg.data.parameters.mask_size_for_layout_object, cfg.data.parameters.mask_size_for_layout_object) * 255.0  # (L, 1, M, M)
-                    #     obj_mask = torch.repeat_interleave(obj_mask, repeats=3, dim=1)  # (L, 3 , M, M)
-                    #     utils.save_image(obj_mask, os.path.join(log_dir, "gt_obj_mask/{}.png".format(filename)), nrow=cfg.data.parameters.layout_length)
-
             torch.cuda.empty_cache()
 
         dist.barrier()
