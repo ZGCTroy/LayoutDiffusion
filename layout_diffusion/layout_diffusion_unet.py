@@ -397,10 +397,17 @@ class ObjectAwareCrossAttention(nn.Module):
             ds=None,
             resolution=None,
             type=None,
-            use_positional_embedding=True
+            use_positional_embedding=True,
+            use_key_padding_mask=False,
+            channels_scale_for_positional_embedding=1.0,
+            norm_first=False,
+            norm_for_obj_embedding=False
     ):
         super().__init__()
-
+        self.norm_for_obj_embedding=None
+        self.norm_first = norm_first
+        self.channels_scale_for_positional_embedding = channels_scale_for_positional_embedding
+        self.use_key_padding_mask=use_key_padding_mask
         self.type = type
         self.ds = ds
         self.resolution = resolution
@@ -424,11 +431,19 @@ class ObjectAwareCrossAttention(nn.Module):
         self.norm_for_qkv = normalization(channels)
 
         if encoder_channels is not None:
+            self.encoder_channels= encoder_channels
             self.layout_content_embedding_projector = conv_nd(1, encoder_channels, channels * 2, 1)
-            self.layout_position_embedding_projector = conv_nd(1, encoder_channels, channels, 1)
-            self.norm_for_obj_class_embedding = normalization(encoder_channels)
-            self.norm_for_layout_positional_embedding = normalization(channels)
-            self.norm_for_image_patch_positional_embedding = normalization(channels)
+            self.layout_position_embedding_projector = conv_nd(1, encoder_channels, int(channels * self.channels_scale_for_positional_embedding), 1)
+            if self.norm_first:
+                if norm_for_obj_embedding:
+                    self.norm_for_obj_embedding = normalization(encoder_channels)
+                self.norm_for_obj_class_embedding = normalization(encoder_channels)
+                self.norm_for_layout_positional_embedding = normalization(encoder_channels)
+                self.norm_for_image_patch_positional_embedding = normalization(encoder_channels)
+            else:
+                self.norm_for_obj_class_embedding = normalization(encoder_channels)
+                self.norm_for_layout_positional_embedding = normalization(int(channels * self.channels_scale_for_positional_embedding))
+                self.norm_for_image_patch_positional_embedding = normalization(int(channels * self.channels_scale_for_positional_embedding))
 
         self.proj_out = zero_module(conv_nd(1, channels, channels, 1))
 
@@ -447,11 +462,15 @@ class ObjectAwareCrossAttention(nn.Module):
         bs, C, L1, L2 = qkv.shape[0], self.channels, qkv.shape[2], cond_kwargs['obj_bbox_embedding'].shape[-1]
 
         # positional embedding for image patch
-        image_patch_positional_embedding = self.layout_position_embedding_projector(
-            cond_kwargs['image_patch_bbox_embedding_for_resolution{}'.format(self.resolution)]
-        )  # N x C x L1, 其中L1=H*W
-        image_patch_positional_embedding = self.norm_for_image_patch_positional_embedding(image_patch_positional_embedding)  # (N, C, L1)
-        image_patch_positional_embedding = image_patch_positional_embedding.reshape(bs * self.num_heads, C // self.num_heads, L1)  # (N * num_heads, C // num_heads, L1)
+        if self.norm_first:
+            image_patch_positional_embedding = self.norm_for_image_patch_positional_embedding(cond_kwargs['image_patch_bbox_embedding_for_resolution{}'.format(self.resolution)])  # (N, encoder_channels, L1)
+            image_patch_positional_embedding = self.layout_position_embedding_projector(image_patch_positional_embedding)  # N x C * channels_scale_for_positional_embedding x L1, 其中L1=H*W
+        else:
+            image_patch_positional_embedding = self.layout_position_embedding_projector(
+                cond_kwargs['image_patch_bbox_embedding_for_resolution{}'.format(self.resolution)]
+            )  # N x C * channels_scale_for_positional_embedding x L1, 其中L1=H*W
+            image_patch_positional_embedding = self.norm_for_image_patch_positional_embedding(image_patch_positional_embedding)  # (N, C * channels_scale_for_positional_embedding, L1)
+        image_patch_positional_embedding = image_patch_positional_embedding.reshape(bs * self.num_heads, int(C * self.channels_scale_for_positional_embedding) // self.num_heads, L1)  # (N * num_heads, C * channels_scale_for_positional_embedding // num_heads, L1)
 
         # content embedding for image patch
         q_image_patch_content_embedding, k_image_patch_content_embedding, v_image_patch_content_embedding = qkv.split(C, dim=1)  # 3 x (N , C, L1)
@@ -460,49 +479,58 @@ class ObjectAwareCrossAttention(nn.Module):
         v_image_patch_content_embedding = v_image_patch_content_embedding.reshape(bs * self.num_heads, C // self.num_heads, L1)  # (N // num_heads, C // num_heads, L1)
 
         # embedding for image patch
-        q_image_patch = torch.cat([q_image_patch_content_embedding, image_patch_positional_embedding], dim=1)  # (N // num_heads, 2 * C // num_heads, L1)
-        k_image_patch = torch.cat([k_image_patch_content_embedding, image_patch_positional_embedding], dim=1)  # (N // num_heads, 2 * C // num_heads, L1)
+        q_image_patch = torch.cat([q_image_patch_content_embedding, image_patch_positional_embedding], dim=1)  # (N // num_heads, (1+channels_scale_for_positional_embedding) * C // num_heads, L1)
+        k_image_patch = torch.cat([k_image_patch_content_embedding, image_patch_positional_embedding], dim=1)  # (N // num_heads, (1+channels_scale_for_positional_embedding) * C // num_heads, L1)
         v_image_patch = v_image_patch_content_embedding  # (N // num_heads, C // num_heads, L1)
 
         # positional embedding for layout
-        layout_positional_embedding = self.layout_position_embedding_projector(cond_kwargs['obj_bbox_embedding'])  # N x C x L2
-        layout_positional_embedding = self.norm_for_layout_positional_embedding(layout_positional_embedding)  # (N, C, L2)
-        layout_positional_embedding = layout_positional_embedding.reshape(bs * self.num_heads, C // self.num_heads, L2)  # (N // num_heads, C // num_heads, L2)
+        if self.norm_first:
+            layout_positional_embedding = self.norm_for_layout_positional_embedding(cond_kwargs['obj_bbox_embedding'])  # (N, encoder_channels, L2)
+            layout_positional_embedding = self.layout_position_embedding_projector(layout_positional_embedding)  # N x C*channels_scale_for_positional_embedding x L2
+        else:
+            layout_positional_embedding = self.layout_position_embedding_projector(cond_kwargs['obj_bbox_embedding'])  # N x C*channels_scale_for_positional_embedding x L2
+            layout_positional_embedding = self.norm_for_layout_positional_embedding(layout_positional_embedding)  # (N, C * channels_scale_for_positional_embedding, L2)
+        layout_positional_embedding = layout_positional_embedding.reshape(bs * self.num_heads, int(C * self.channels_scale_for_positional_embedding) // self.num_heads, L2)  # (N // num_heads, channels_scale_for_positional_embedding * C // num_heads, L2)
 
         # content embedding for layout
-        layout_content_embedding = (cond_kwargs['xf_out'] + self.norm_for_obj_class_embedding(cond_kwargs['obj_class_embedding'])) / 2
+        if self.norm_for_obj_embedding is not None:
+            layout_content_embedding = (self.norm_for_obj_embedding(cond_kwargs['xf_out']) + self.norm_for_obj_class_embedding(cond_kwargs['obj_class_embedding'])) / 2
+        else:
+            layout_content_embedding = (cond_kwargs['xf_out'] + self.norm_for_obj_class_embedding(cond_kwargs['obj_class_embedding'])) / 2
         k_layout_content_embedding, v_layout_content_embedding = self.layout_content_embedding_projector(layout_content_embedding).split(C, dim=1)  # 2 x (N x C x L2)
         k_layout_content_embedding = k_layout_content_embedding.reshape(bs * self.num_heads, C // self.num_heads, L2)  # (N // num_heads, C // num_heads, L2)
         v_layout_content_embedding = v_layout_content_embedding.reshape(bs * self.num_heads, C // self.num_heads, L2)  # (N // num_heads, C // num_heads, L2)
 
         # embedding for layout
-        k_layout = torch.cat([k_layout_content_embedding, layout_positional_embedding], dim=1)  # (N // num_heads, 2 * C // num_heads, L2)
+        k_layout = torch.cat([k_layout_content_embedding, layout_positional_embedding], dim=1)  # (N // num_heads, (1+channels_scale_for_positional_embedding) * C // num_heads, L2)
         v_layout = v_layout_content_embedding  # (N // num_heads, C // num_heads, L2)
 
         #  mix embedding for cross attention
-        k_mix = th.cat([k_image_patch, k_layout], dim=2)  # (N // num_heads, 2 * C // num_heads, L1+L2)
+        k_mix = th.cat([k_image_patch, k_layout], dim=2)  # (N // num_heads, (1+channels_scale_for_positional_embedding) * C // num_heads, L1+L2)
         v_mix = th.cat([v_image_patch, v_layout], dim=2)  # (N // num_heads, 1 * C // num_heads, L1+L2)
 
+        if self.use_key_padding_mask:
+            key_padding_mask = torch.cat(
+                [
+                    torch.zeros((bs, L1), device=cond_kwargs['key_padding_mask'].device).bool(),  # (N, L1)
+                    cond_kwargs['key_padding_mask']  # (N, L2)
+                ],
+                dim=1
+            )  # (N, L1+L2)
+            print(cond_kwargs['key_padding_mask'])
 
-        key_padding_mask = torch.cat(
-            [
-                torch.zeros((bs, L1), device=cond_kwargs['key_padding_mask'].device).bool(),  # (N, L1)
-                cond_kwargs['key_padding_mask']  # (N, L2)
-            ],
-            dim=1
-        )  # (N, L1+L2)
-
-        scale = 1 / math.sqrt(math.sqrt(2 * C // self.num_heads))
+        scale = 1 / math.sqrt(math.sqrt(int((1+self.channels_scale_for_positional_embedding) * C) // self.num_heads))
         attn_output_weights = th.einsum(
             "bct,bcs->bts", q_image_patch * scale, k_mix * scale
         )  # More stable with f16 than dividing afterwards, (N x num_heads, L1, L1+L2)
 
         attn_output_weights = attn_output_weights.view(bs, self.num_heads, L1, L1 + L2)
 
-        attn_output_weights = attn_output_weights.masked_fill(
-            key_padding_mask.unsqueeze(1).unsqueeze(2),  # (N, 1, 1, L1+L2)
-            float('-inf'),
-        )
+        if self.use_key_padding_mask:
+            attn_output_weights = attn_output_weights.masked_fill(
+                key_padding_mask.unsqueeze(1).unsqueeze(2),  # (N, 1, 1, L1+L2)
+                float('-inf'),
+            )
         attn_output_weights = attn_output_weights.view(bs * self.num_heads, L1, L1 + L2)
 
         attn_output_weights = th.softmax(attn_output_weights.float(), dim=-1).type(attn_output_weights.dtype)  # (N x num_heads, L1, L1+L2)
@@ -664,9 +692,17 @@ class LayoutDiffusionUNetModel(nn.Module):
             use_positional_embedding_for_attention=False,
             image_size=256,
             attention_block_type='GLIDE',
-            num_attention_blocks=1
+            num_attention_blocks=1,
+            use_key_padding_mask=False,
+            channels_scale_for_positional_embedding=1.0,
+            norm_first=False,
+            norm_for_obj_embedding=False
     ):
         super().__init__()
+        self.norm_for_obj_embedding = norm_for_obj_embedding
+        self.channels_scale_for_positional_embedding = channels_scale_for_positional_embedding
+        self.norm_first = norm_first
+        self.use_key_padding_mask=use_key_padding_mask
         self.num_attention_blocks = num_attention_blocks
         self.attention_block_type = attention_block_type
         if self.attention_block_type == 'GLIDE':
@@ -726,6 +762,7 @@ class LayoutDiffusionUNetModel(nn.Module):
                 ]
                 ch = int(mult * model_channels)
                 if ds in attention_ds:
+                    print('encoder attention layer: ds = {}, resolution = {}'.format(ds, self.image_size // ds))
                     for _ in range(self.num_attention_blocks):
                         layers.append(
                             attention_block_fn(
@@ -737,7 +774,11 @@ class LayoutDiffusionUNetModel(nn.Module):
                                 ds=ds,
                                 resolution=int(self.image_size // ds),
                                 type='input',
-                                use_positional_embedding=self.use_positional_embedding_for_attention
+                                use_positional_embedding=self.use_positional_embedding_for_attention,
+                                use_key_padding_mask=self.use_key_padding_mask,
+                                channels_scale_for_positional_embedding=self.channels_scale_for_positional_embedding,
+                                norm_first=self.norm_first,
+                                norm_for_obj_embedding=self.norm_for_obj_embedding
                             )
                         )
                 self.input_blocks.append(TimestepEmbedSequential(*layers))
@@ -768,6 +809,7 @@ class LayoutDiffusionUNetModel(nn.Module):
                 ds *= 2
                 self._feature_size += ch
 
+        print('middle attention layer: ds = {}, resolution = {}'.format(ds, self.image_size // ds))
         self.middle_block = TimestepEmbedSequential(
             ResBlock(
                 ch,
@@ -786,7 +828,11 @@ class LayoutDiffusionUNetModel(nn.Module):
                 ds=ds,
                 resolution=int(self.image_size // ds),
                 type='middle',
-                use_positional_embedding=self.use_positional_embedding_for_attention
+                use_positional_embedding=self.use_positional_embedding_for_attention,
+                use_key_padding_mask=self.use_key_padding_mask,
+                channels_scale_for_positional_embedding=self.channels_scale_for_positional_embedding,
+                norm_first=self.norm_first,
+                norm_for_obj_embedding=self.norm_for_obj_embedding
             ),
             ResBlock(
                 ch,
@@ -816,7 +862,7 @@ class LayoutDiffusionUNetModel(nn.Module):
                 ]
                 ch = int(model_channels * mult)
                 if ds in attention_ds:
-
+                    print('decoder attention layer: ds = {}, resolution = {}'.format(ds, self.image_size // ds))
                     for _ in range(self.num_attention_blocks):
                         layers.append(
                             attention_block_fn(
@@ -828,7 +874,11 @@ class LayoutDiffusionUNetModel(nn.Module):
                                 ds=ds,
                                 resolution=int(self.image_size // ds),
                                 type='output',
-                                use_positional_embedding=self.use_positional_embedding_for_attention
+                                use_positional_embedding=self.use_positional_embedding_for_attention,
+                                use_key_padding_mask=self.use_key_padding_mask,
+                                channels_scale_for_positional_embedding=self.channels_scale_for_positional_embedding,
+                                norm_first=self.norm_first,
+                                norm_for_obj_embedding=self.norm_for_obj_embedding
                             )
                         )
                 if level and i == num_res_blocks:

@@ -14,12 +14,17 @@ model:
     num_res_blocks: 2
     num_attention_blocks: 1
     resblock_updown: True
-    attention_ds: [ 4, 2, 1 ]
-    channel_mult: [ 1, 2, 4 ]
-    dropout: 0.0
+    attention_ds: [ 16, 8, 4, 2, 1 ]
+    channel_mult: [ 1, 2, 2, 4, 4 ]
+    dropout: 0.1
     use_checkpoint: False
     use_positional_embedding_for_attention: True
+    use_key_padding_mask: False
+    channels_scale_for_positional_embedding: 0.125
+    norm_first: True
+    norm_for_obj_embedding: True
     attention_block_type: 'ObjectAwareCrossAttention'
+
 
 
     layout_encoder:
@@ -34,7 +39,7 @@ model:
         num_heads: 8
         use_final_ln: True
         use_positional_embedding: False
-        resolution_to_attention: [ 8, 16, 32 ]
+        resolution_to_attention: [ 2, 4, 8, 16, 32 ]
         use_key_padding_mask: False
 
 
@@ -57,12 +62,12 @@ data:
   type: 'COCO-stuff'
   parameters:
     filter_mode: 'LostGAN'
-    use_deprecated_stuff2017: True
+    use_deprecated_stuff2017: False
     image_size: 256
     layout_length: 10
     num_classes_for_layout_object: 185
     mask_size_for_layout_object: 32
-    loader_num_workers: 4
+    loader_num_workers: 8
     include_relationships: False
     root_dir: '/workspace/mnt/storage/zhouxianpan/COCO-stuff'
     instance_whitelist: null
@@ -83,7 +88,7 @@ data:
       max_num_samples: null
       specific_image_ids: [ ]
       shuffle: True
-      batch_size: 32           # 8 GPUs, total_batch_size=8x32=256;
+      batch_size: 32          # 16 GPUs, total_batch_size=16x16=256;
       left_right_flip: True
       use_MinIoURandomCrop: True
     val:
@@ -116,18 +121,18 @@ train:
   vae_root_dir: './pretrained_models/sd-vae-ft-ema'
   latent_diffusion: True
   pretrained_model_path: ''
-  resume_checkpoint: ''
+  resume_checkpoint: '/workspace/mnt/storage/guangcongzheng/zju_zgc/test_for_github/LayoutDiffusion/log/COCO-stuff_256x256/latent_LayoutDiffusion_large_4blocks_normFirst_channelsScaleForPositionalEmbedding0.125_normForObj/model0610000.pt'
   classifier_free: True
   classifier_free_dropout: 0.2
-  lr: 1e-4
+  lr: 5e-5
   ema_rate: "0.9999"
-  micro_batch_size: 16 # need 23.5GB memory per GPU
+  micro_batch_size: 8 # need 23.5GB memory per GPU
   save_interval: 10000
   log_interval: 1000
-  log_dir: './log/COCO-stuff_256x256/latent_LayoutDiffusion_large'
+  log_dir: './log/COCO-stuff_256x256/latent_LayoutDiffusion_large_4blocks_normFirst_channelsScaleForPositionalEmbedding0.125_normForObj'
   use_fp16: True
   fp16_scale_growth: 1e-3
-  weight_decay: 0.0
+  weight_decay: 1e-5
   lr_anneal_steps: 0
   find_unused_parameters: False
   only_update_parameters_that_require_grad: False
@@ -137,7 +142,7 @@ train:
 sample:
   fix_seed: True
   use_fp16: True
-  log_root: '/workspace/mnt/storage/guangcongzheng/zju_zgc_backup/samples/COCO-stuff_256x256/LayoutDiffusion_large'
+  log_root: '/workspace/mnt/storage/guangcongzheng/zju_zgc_backup/samples/COCO-stuff_256x256/LayoutDiffusion_large_4blocks'
   sample_suffix: 'model1150000'
   pretrained_model_path: './pretrained_models/COCO-stuff_256x256_LayoutDiffusion_large_ema_1150000.pt'
   classifier_free: True
