@@ -1,6 +1,7 @@
 ## News and ToDo List
 
-- [ ] Improve latent space training skills
+- [ ] Improve latent space training skills (For fair comparison with previous methods, we train from scratch on COCO-stuff, not finetuned from Stable Diffusion)
+- [ ] Release the pretrained LayoutDiffusion on latent space !!!COMING SOON!!!
 - [x] Improve README and code usage instructions
 - [x] Clean up code
 - [x] Code for Training on Latent Space using AutoEncoderKL
