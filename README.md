@@ -1,8 +1,9 @@
 ## News and ToDo List
 
-- [ ] Improve README and code usage instructions
-- [ ] Clean up code
-- [ ] Code for Training on Latent Space using AutoEncoderKL, !!!COMING SOON!!! 
+- [ ] Improve latent space training skills
+- [x] Improve README and code usage instructions
+- [x] Clean up code
+- [x] Code for Training on Latent Space using AutoEncoderKL
 - [x] Release tools for evaluation
 - [x] 2023-04-09: Release [pre-trained model](https://drive.google.com/drive/folders/1sJxbhi_pioFaHKgAAAuo8wZLIBuLbyxz?usp=sharing) 
 - [x] 2023-04-09: Release instructions for environment and training 
