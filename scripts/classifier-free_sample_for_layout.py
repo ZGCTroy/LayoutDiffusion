@@ -74,15 +74,16 @@ def main():
     if cfg.sample.pretrained_model_path:
         logger.log("loading model from {}".format(cfg.sample.pretrained_model_path))
         checkpoint = dist_util.load_state_dict(cfg.sample.pretrained_model_path, map_location="cpu")
-        if 'layout_encoder.obj_box_embedding.weight' in list(checkpoint.keys()):
-            checkpoint['layout_encoder.obj_bbox_embedding.weight'] = checkpoint.pop('layout_encoder.obj_box_embedding.weight')
-            checkpoint['layout_encoder.obj_bbox_embedding.bias'] = checkpoint.pop('layout_encoder.obj_box_embedding.bias')
+        # if 'layout_encoder.obj_box_embedding.weight' in list(checkpoint.keys()):
+        #     logger.log('pop layout_encoder.obj_box_embedding.weight')
+        #     return
+        #     checkpoint['layout_encoder.obj_bbox_embedding.weight'] = checkpoint.pop('layout_encoder.obj_box_embedding.weight')
+        #     checkpoint['layout_encoder.obj_bbox_embedding.bias'] = checkpoint.pop('layout_encoder.obj_box_embedding.bias')
         try:
             model.load_state_dict(checkpoint, strict=True)
             logger.log('successfully load the entire model')
         except:
             logger.log('not successfully load the entire model, try to load part of model')
-
             model.load_state_dict(checkpoint, strict=False)
 
     model.to(dist_util.dev())

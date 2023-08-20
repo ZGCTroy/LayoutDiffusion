@@ -48,11 +48,12 @@ with the following modifications:
 
 ## Setup Environment
 ```bash
-conda create -n LayoutDiffusion python=3.8
+conda create -y -n LayoutDiffusion python=3.8
 conda activate LayoutDiffusion
 
 conda install pytorch==1.10.1 torchvision==0.11.2 torchaudio==0.10.1 cudatoolkit=11.3 -c pytorch -c conda-forge
-pip install omegaconf opencv-python h5py==3.2.1 gradio==3.38.0
+conda install -y imageio==2.9.0
+pip install omegaconf opencv-python h5py==3.2.1 gradio==3.38.0 
 # try '''pip install -U gradio''' when meeting bugs
 pip install -e ./repositories/dpm_solver
 
@@ -106,6 +107,9 @@ python -m torch.distributed.launch \
 ```
 
 ## Sampling
+```bash
+pip install --upgrade diffusers[torch]
+```
 * bash/quick_sample.bash for quick sample
 * bash/sample.bash for sample entire test dataset
 
